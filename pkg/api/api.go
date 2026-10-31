@@ -30,23 +30,34 @@ const (
 	MethodGitCheck  = "stack.git.check"
 	MethodGitPull   = "stack.git.pull"
 
-	MethodContainersUp             = "stack.containers.up"
-	MethodContainersDown           = "stack.containers.down"
-	MethodContainersRestart        = "stack.containers.restart"
-	MethodContainersBuild          = "stack.containers.build"
-	MethodContainersPs             = "stack.containers.ps"
-	MethodContainersExec           = "stack.containers.exec"
-	MethodContainersLogs           = "stack.containers.logs"
-	MethodContainersNetworks       = "stack.containers.networks"
-	MethodContainersNetworkConnect = "stack.containers.network_connect"
+	MethodContainersUp                = "stack.containers.up"
+	MethodContainersDown              = "stack.containers.down"
+	MethodContainersRestart           = "stack.containers.restart"
+	MethodContainersBuild             = "stack.containers.build"
+	MethodContainersPs                = "stack.containers.ps"
+	MethodContainersExec              = "stack.containers.exec"
+	MethodContainersLogs              = "stack.containers.logs"
+	MethodContainersNetworks          = "stack.containers.networks"
+	MethodContainersNetworkConnect    = "stack.containers.network_connect"
 	MethodContainersNetworkDisconnect = "stack.containers.network_disconnect"
 
 	MethodCommandList = "stack.command.list"
 	MethodCommandRun  = "stack.command.run"
 
+	// MethodCancel cancels an in-flight request by its JSON-RPC id.
+	MethodCancel = "cancel"
+
 	// Notifications (server -> client), docs/api.md §4.
 	NotifyStreamLog  = "stream.log"
 	NotifyStreamStep = "stream.step"
+)
+
+// JSON-RPC error codes used by the agent.
+const (
+	ErrNotFound      = -32004
+	ErrConflict      = -32010
+	ErrInvalidParams = -32602
+	ErrInternal      = -32603
 )
 
 // Request is a JSON-RPC request/notification frame.
@@ -157,4 +168,46 @@ type ContainerStatus struct {
 	Service string `json:"service"`
 	State   string `json:"state"`
 	Status  string `json:"status"`
+}
+
+// ExecResult is the result of stack.containers.exec.
+type ExecResult struct {
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+}
+
+// Network is one Docker network (stack.containers.networks).
+type Network struct {
+	Name   string `json:"name"`
+	Driver string `json:"driver"`
+	Scope  string `json:"scope"`
+}
+
+// OKResult is the generic success result.
+type OKResult struct {
+	OK bool `json:"ok"`
+}
+
+// CommandRunResult is the final result of stack.command.run.
+type CommandRunResult struct {
+	OK       bool `json:"ok"`
+	ExitCode int  `json:"exit_code"`
+}
+
+// StreamLog is the params payload of a stream.log notification.
+type StreamLog struct {
+	Stack   string `json:"stack"`
+	Command string `json:"command,omitempty"`
+	Stream  string `json:"stream"`
+	Data    string `json:"data"`
+}
+
+// StreamStep is the params payload of a stream.step notification.
+type StreamStep struct {
+	Stack   string `json:"stack"`
+	Command string `json:"command,omitempty"`
+	Step    int    `json:"step"`
+	Total   int    `json:"total"`
+	Label   string `json:"label"`
 }

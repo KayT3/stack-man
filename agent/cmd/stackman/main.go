@@ -5,10 +5,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/example/stack-man/agent/internal/cli"
+	"github.com/example/stack-man/agent/internal/config"
+	"github.com/example/stack-man/agent/internal/daemon"
+	"github.com/example/stack-man/agent/internal/service"
 )
 
 func main() {
@@ -23,10 +29,34 @@ func main() {
 }
 
 // runDaemon serves the private RPC API bound to the subnet IP.
-// TODO(phase 2): see docs/agent.md §5 and docs/api.md.
-func runDaemon(_ []string) {
-	fmt.Fprintln(os.Stderr, "stackman daemon: not implemented yet")
-	os.Exit(1)
+func runDaemon(args []string) {
+	configPath := config.DefaultConfigPath
+	if len(args) > 0 {
+		configPath = args[0]
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	svc, err := service.New(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	defer svc.Close()
+
+	srv, err := daemon.New(svc, cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := srv.Run(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 }
 
 // runCLI dispatches one-shot commands (config, install, stack, git, ...).

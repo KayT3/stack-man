@@ -18,6 +18,12 @@ const ProtocolVersion = 1
 // signature reuse.
 const DomainPrefix = "stackman-auth-v1"
 
+// Handshake method names.
+const (
+	MethodChallenge    = "auth.challenge"
+	MethodAuthenticate = "auth.authenticate"
+)
+
 // Auth error codes (JSON-RPC error codes), per docs/api.md §2.3.
 const (
 	ErrUnauthorizedKey = -32001
