@@ -1,9 +1,12 @@
+//go:build !wails
+
 // stackman-desktop: the Wails desktop client backend (docs/client.md).
 //
 // The Wails entry point and webview are provided by the `wails` build tag in
 // main_wails.go (generated/kept alongside `wails.json`). This default build is
 // a headless backend smoke test so `go build ./client/...` works on hosts
-// without the Wails toolchain.
+// without the Wails toolchain. Build the desktop app with `make client` or
+// `wails build -tags wails`.
 package main
 
 import (

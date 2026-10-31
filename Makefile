@@ -59,7 +59,7 @@ client: frontend
 		echo "then:    make wails-deps"; \
 		exit 1; \
 	}
-	cd client && wails build -clean -trimpath -ldflags "$(LDFLAGS)" -s
+	cd client && wails build -tags wails -clean -trimpath -ldflags "$(LDFLAGS)" -s
 	@mkdir -p "$(DIST)"
 ifeq ($(HOST_OS),darwin)
 	cp -R "client/build/bin/stackman-desktop.app" \

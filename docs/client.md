@@ -129,8 +129,10 @@ Views: **Agents** → **Stack detail** (services + policy) → **command runner*
 
 - Wails targets Windows/macOS/Linux; the client is most useful on the laptop
   running the WARP client (so it has a subnet IP).
-- Build: `wails build` inside `client/`. The webview needs the Wails runtime on
-  Windows (bundled automatically).
+- Build: `wails build -tags wails` inside `client/`, or `make client` from the
+  repo root. The `wails` tag selects `main_wails.go`; without it the build is a
+  headless stub. The webview needs the Wails runtime on Windows (bundled
+  automatically).
 
 ## 8. What's deferred to the UI phase (by design)
 

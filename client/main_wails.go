@@ -2,9 +2,11 @@
 
 // Wails entry point. Build with:
 //
-//	go get github.com/wailsapp/wails/v2@latest
 //	cd frontend && npm install && npm run build
-//	cd .. && wails build
+//	cd .. && wails build -tags wails
+//
+// or `make client` from the repo root. The `wails` tag is required so this file
+// replaces the headless stub in main.go.
 package main
 
 import (

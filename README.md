@@ -74,7 +74,7 @@ sudo ./stackman install
 ```bash
 # one-time: install the Wails CLI (https://wails.io/docs/gettingstarted/installation)
 cd client/frontend && npm install && npm run build
-cd .. && wails build
+cd .. && wails build -tags wails
 ```
 
 The resulting `stackman-desktop` binary discovers agents on your WARP subnet
