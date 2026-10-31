@@ -72,6 +72,22 @@ func TestDeriveSubnet(t *testing.T) {
 	}
 }
 
+func TestDeriveSubnetWARPPointToPoint(t *testing.T) {
+	// WARP presents a /32, which must not become the peer subnet.
+	_, network, _ := net.ParseCIDR("100.96.0.2/32")
+	network.IP = net.ParseIP("100.96.0.2")
+	got := DeriveSubnet(net.ParseIP("100.96.0.2"), network)
+	if got != Default().Subnet {
+		t.Fatalf("DeriveSubnet = %q, want %q", got, Default().Subnet)
+	}
+	// A non-CGNAT /32 (e.g. a provider point-to-point link) is left alone.
+	_, lan, _ := net.ParseCIDR("192.168.1.5/32")
+	lan.IP = net.ParseIP("192.168.1.5")
+	if got := DeriveSubnet(net.ParseIP("192.168.1.5"), lan); got != "192.168.1.5/32" {
+		t.Fatalf("non-CGNAT DeriveSubnet = %q", got)
+	}
+}
+
 func TestInCGNAT(t *testing.T) {
 	if !inCGNAT(net.ParseIP("100.96.1.2")) {
 		t.Fatal("100.96.1.2 should be CGNAT")

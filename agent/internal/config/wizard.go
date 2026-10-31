@@ -86,9 +86,17 @@ func inCGNAT(ip net.IP) bool {
 
 // DeriveSubnet returns the network CIDR containing ip using the interface's
 // netmask.
+//
+// Cloudflare WARP assigns each device a point-to-point /32, so the interface
+// mask would yield a subnet that contains only the agent itself. Peers on the
+// same WARP network then fail the daemon's source-subnet check, so WARP
+// addresses fall back to the documented shared range.
 func DeriveSubnet(ip net.IP, network *net.IPNet) string {
 	if network == nil {
 		return ""
+	}
+	if ones, bits := network.Mask.Size(); bits == 32 && ones == 32 && inCGNAT(ip) {
+		return Default().Subnet
 	}
 	return (&net.IPNet{IP: ip.Mask(network.Mask), Mask: network.Mask}).String()
 }
