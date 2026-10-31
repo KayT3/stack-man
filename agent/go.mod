@@ -7,6 +7,8 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/compose-spec/compose-go/v2 v2.16.2
 	github.com/example/stack-man/pkg v0.0.0
+	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.61.0
 )
 
@@ -17,7 +19,6 @@ require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/mattn/go-colorable v0.1.2 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-shellwords v1.0.12 // indirect
