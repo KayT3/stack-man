@@ -16,7 +16,8 @@
 #     `wails build -s` can skip the frontend step entirely.
 #   * `make client` needs the Wails CLI. First time:
 #       go install github.com/wailsapp/wails/v2/cmd/wails@latest
-#       cd client && go get github.com/wailsapp/wails/v2@latest
+#     The Wails Go dependency is pinned in client/go.mod; `make wails-deps`
+#     upgrades it.
 
 SHELL := sh
 .DEFAULT_GOAL := release
