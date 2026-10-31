@@ -3,74 +3,71 @@ package commands
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/example/stack-man/agent/internal/stack"
 )
 
-type recordingStep struct {
-	config map[string]any
+type recordStep struct {
+	Tag  string
+	List []string
 }
 
-func (s *recordingStep) StepName() string { return "record" }
-func (s *recordingStep) Execute(context.Context, *stack.Stack, map[string]string, io.Writer) error {
-	return errors.New("not configured")
+func (s *recordStep) StepName() string { return "record" }
+
+func (s *recordStep) Substitute(params map[string]string) Step {
+	if s == nil {
+		return (*recordStep)(nil)
+	}
+	return &recordStep{
+		Tag:  expand(s.Tag, params),
+		List: expandSlice(s.List, params),
+	}
 }
-func (s *recordingStep) ExecuteStep(_ context.Context, _ *stack.Stack, _ map[string]string, cfg map[string]any, out io.Writer) error {
-	s.config = cfg
+
+type recordExecutor struct {
+	got *recordStep
+}
+
+func (e *recordExecutor) StepName() string { return "record" }
+
+func (e *recordExecutor) Execute(_ context.Context, _ *stack.Stack, _ map[string]string, step Step, out io.Writer) error {
+	cfg, ok := step.(*recordStep)
+	if !ok || cfg == nil {
+		return fmt.Errorf("record: wrong step type %T", step)
+	}
+	e.got = cfg
 	fmt.Fprint(out, "recorded")
 	return nil
 }
 
-func TestLoadAndRun(t *testing.T) {
-	dir := t.TempDir()
-	content := `
-version: 1
-on_pull: update
-commands:
-  deploy:
-    description: "Deploy"
-    params:
-      - name: tag
-        required: true
-      - name: mode
-        default: safe
-        allowed: [safe, fast]
-    steps:
-      - record:
-          tag: ${tag}
-          list: ["${mode}", plain]
-`
-	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+func TestProfileRun(t *testing.T) {
+	p := &Profile{
+		Repo:   "github.com/stackman-tests/demo",
+		OnPull: "deploy",
+		Commands: map[string]Def{
+			"deploy": {
+				Description: "Deploy",
+				Params: []Param{
+					{Name: "tag", Required: true},
+					{Name: "mode", Default: "safe", Allowed: []string{"safe", "fast"}},
+				},
+				Steps: []Step{
+					&recordStep{Tag: "${tag}", List: []string{"${mode}", "plain"}},
+				},
+			},
+		},
 	}
-	f, err := Load(dir)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if f.OnPull != "update" {
-		t.Fatalf("on_pull = %q", f.OnPull)
-	}
-	if got := f.Names(); len(got) != 1 || got[0] != "deploy" {
-		t.Fatalf("names = %v", got)
-	}
-	if spec := f.Commands["deploy"].Spec(); len(spec.Params) != 2 || !spec.Params[0].Required {
-		t.Fatalf("spec = %+v", spec)
-	}
-
-	rec := &recordingStep{}
+	rec := &recordExecutor{}
 	RegisterStep(rec)
+
 	var out bytes.Buffer
 	var progress []string
-	err = NewRunner().Run(context.Background(), &stack.Stack{Name: "x", Path: dir}, f, "deploy",
+	err := NewRunner().Run(context.Background(), &stack.Stack{Name: "x"}, p, "deploy",
 		map[string]string{"tag": "v1"}, &out, func(step, total int, label string) {
 			progress = append(progress, fmt.Sprintf("%d/%d %s", step, total, label))
 		})
@@ -80,12 +77,12 @@ commands:
 	if out.String() != "recorded" {
 		t.Fatalf("out = %q", out.String())
 	}
-	if rec.config["tag"] != "v1" {
-		t.Fatalf("cfg = %+v", rec.config)
+	if rec.got.Tag != "v1" {
+		t.Fatalf("tag = %q", rec.got.Tag)
 	}
-	list, ok := rec.config["list"].([]any)
-	if !ok || len(list) != 2 || list[0] != "safe" || list[1] != "plain" {
-		t.Fatalf("list = %#v", rec.config["list"])
+	wantList := []string{"safe", "plain"}
+	if !reflect.DeepEqual(rec.got.List, wantList) {
+		t.Fatalf("list = %#v, want %#v", rec.got.List, wantList)
 	}
 	if len(progress) != 1 || !strings.Contains(progress[0], "1/1") {
 		t.Fatalf("progress = %v", progress)
@@ -93,59 +90,116 @@ commands:
 }
 
 func TestRunParamErrors(t *testing.T) {
-	dir := t.TempDir()
-	f := &File{Commands: map[string]Def{
-		"need":   {Steps: []YAMLStep{{Type: "record"}}, Params: []ParamDef{{Name: "name", Required: true}}},
-		"choice": {Steps: []YAMLStep{{Type: "record"}}, Params: []ParamDef{{Name: "mode", Allowed: []string{"a", "b"}}}},
-	}}
-	RegisterStep(&recordingStep{})
-	st := &stack.Stack{Name: "x", Path: dir}
-	if err := NewRunner().Run(context.Background(), st, f, "need", nil, io.Discard, nil); err == nil {
+	p := &Profile{
+		Repo: "github.com/stackman-tests/params",
+		Commands: map[string]Def{
+			"need":   {Steps: []Step{&recordStep{}}, Params: []Param{{Name: "name", Required: true}}},
+			"choice": {Steps: []Step{&recordStep{}}, Params: []Param{{Name: "mode", Allowed: []string{"a", "b"}}}},
+		},
+	}
+	RegisterStep(&recordExecutor{})
+	st := &stack.Stack{Name: "x"}
+	if err := NewRunner().Run(context.Background(), st, p, "need", nil, io.Discard, nil); err == nil {
 		t.Fatal("expected required param error")
 	}
-	if err := NewRunner().Run(context.Background(), st, f, "choice", map[string]string{"mode": "c"}, io.Discard, nil); err == nil {
+	if err := NewRunner().Run(context.Background(), st, p, "choice", map[string]string{"mode": "c"}, io.Discard, nil); err == nil {
 		t.Fatal("expected allowed-value error")
 	}
-	if err := NewRunner().Run(context.Background(), st, f, "missing", nil, io.Discard, nil); err == nil {
+	if err := NewRunner().Run(context.Background(), st, p, "missing", nil, io.Discard, nil); err == nil {
 		t.Fatal("expected missing command error")
+	}
+	if err := NewRunner().Run(context.Background(), st, nil, "missing", nil, io.Discard, nil); err == nil {
+		t.Fatal("expected missing profile error")
 	}
 }
 
-func TestLoadMissingAndInvalid(t *testing.T) {
-	f, err := Load(t.TempDir())
-	if err != nil || f != nil {
-		t.Fatalf("missing file = %v, %v", f, err)
+func TestNormalizeRemote(t *testing.T) {
+	cases := map[string]string{
+		"":                                                "",
+		"/srv/hotel":                                      "",
+		`C:\repos\hotel`:                                  "",
+		"git@github.com:Owner/Repo.git":                   "github.com/owner/repo",
+		"https://github.com/Owner/Repo.git":               "github.com/owner/repo",
+		"https://github.com/Owner/Repo/":                  "github.com/owner/repo",
+		"ssh://git@github.com:22/Owner/Repo.git":          "github.com/owner/repo",
+		"git://github.com/Owner/Repo.GIT":                 "github.com/owner/repo",
+		"https://user:pass@github.com/Owner/Repo.git?x=1": "github.com/owner/repo",
+		"https://github.com/":                             "",
+		"github.com:Owner/Repo.git":                       "github.com/owner/repo",
 	}
+	for input, want := range cases {
+		if got := NormalizeRemote(input); got != want {
+			t.Errorf("NormalizeRemote(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
 
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("commands:\n  x:\n    steps: []\n"), 0o644); err != nil {
-		t.Fatal(err)
+func TestProfileRegistry(t *testing.T) {
+	p := Profile{
+		Repo:    "git@github.com:Stackman-Tests/Widgets.git",
+		Aliases: []string{"https://gitlab.com/stackman-tests/widgets"},
+		OnPull:  "build",
+		Commands: map[string]Def{
+			"build": {
+				Description: "Build widgets",
+				Steps:       []Step{&ShellStep{Command: "echo build"}},
+			},
+		},
 	}
-	if _, err := Load(dir); err == nil {
-		t.Fatal("expected error for command without steps")
-	}
+	RegisterProfile(p)
 
-	dir = t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("version: 9\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for _, remote := range []string{
+		"git@github.com:Stackman-Tests/Widgets.git",
+		"https://github.com/stackman-tests/widgets/",
+		"ssh://git@github.com/stackman-tests/widgets.git",
+		"https://gitlab.com/Stackman-Tests/Widgets",
+	} {
+		got := ProfileFor(remote)
+		if got == nil || got.Repo != "github.com/stackman-tests/widgets" {
+			t.Fatalf("ProfileFor(%q) = %+v", remote, got)
+		}
 	}
-	if _, err := Load(dir); err == nil {
-		t.Fatal("expected unsupported version error")
+	if got := ProfileFor(""); got != nil {
+		t.Fatalf("ProfileFor(empty) = %+v", got)
 	}
+	got := ProfileFor("git@github.com:Stackman-Tests/Widgets.git")
+	if names := got.Names(); len(names) != 1 || names[0] != "build" {
+		t.Fatalf("names = %v", names)
+	}
+	def, ok := got.Get("build")
+	if !ok || def.Description != "Build widgets" {
+		t.Fatalf("build = %+v, %v", def, ok)
+	}
+}
+
+func TestRegisterProfileRejectsDuplicate(t *testing.T) {
+	p := Profile{
+		Repo: "github.com/stackman-tests/duplicate",
+		Commands: map[string]Def{
+			"x": {Steps: []Step{&ShellStep{Command: "true"}}},
+		},
+	}
+	RegisterProfile(p)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected duplicate profile panic")
+		}
+	}()
+	RegisterProfile(p)
 }
 
 func TestShellStep(t *testing.T) {
 	dir := t.TempDir()
-	step := &ShellStep{}
 	var out bytes.Buffer
-	cmd := "echo hello"
-	if err := step.ExecuteStep(context.Background(), &stack.Stack{Path: dir}, nil, map[string]any{"command": cmd}, &out); err != nil {
+	step := &ShellStep{Command: "echo hello"}
+	if err := (&ShellExecutor{}).Execute(context.Background(), &stack.Stack{Path: dir}, nil, step, &out); err != nil {
 		t.Fatalf("shell: %v", err)
 	}
 	if !strings.Contains(out.String(), "hello") {
 		t.Fatalf("out = %q", out.String())
 	}
-	if err := step.ExecuteStep(context.Background(), &stack.Stack{Path: dir}, nil, map[string]any{"command": "echo x", "cwd": "../../"}, &out); err == nil {
+	bad := &ShellStep{Command: "echo x", Cwd: "../../"}
+	if err := (&ShellExecutor{}).Execute(context.Background(), &stack.Stack{Path: dir}, nil, bad, &out); err == nil {
 		t.Fatal("expected cwd escape error")
 	}
 }
@@ -165,10 +219,19 @@ func TestTargetServices(t *testing.T) {
 	}
 }
 
-func TestStepUnmarshalRejectsMultipleKeys(t *testing.T) {
-	var s YAMLStep
-	err := yaml.Unmarshal([]byte("compose:\n  action: up\nexec:\n  service: x\n"), &s)
-	if err == nil {
-		t.Fatal("expected error")
+func TestStepLabel(t *testing.T) {
+	cases := []struct {
+		step Step
+		want string
+	}{
+		{&ComposeStep{Action: "up", Services: []string{"a", "b"}}, "docker compose up a b"},
+		{&ExecStep{Service: "next", Command: "migrate"}, "docker compose exec next migrate"},
+		{&ShellStep{Command: "echo hi"}, "shell: echo hi"},
+		{&GitStep{Action: "pull"}, "git pull"},
+	}
+	for _, c := range cases {
+		if got := StepLabel(c.step); got != c.want {
+			t.Errorf("StepLabel(%T) = %q, want %q", c.step, got, c.want)
+		}
 	}
 }

@@ -94,7 +94,7 @@ Read in this order:
 4. [`docs/api.md`](docs/api.md) — the RPC protocol and SSH challenge-response auth.
 5. [`docs/discovery.md`](docs/discovery.md) — UDP beacon + the Magic WAN caveat and fallback.
 6. [`docs/stacks.md`](docs/stacks.md) — the stack model, allow/deny services, storage.
-7. [`docs/commands.md`](docs/commands.md) — the command system (Go interface + `.stackman.yaml` DSL).
+7. [`docs/commands.md`](docs/commands.md) — the command system (Go interface + compiled-in repo profiles).
 8. [`docs/client.md`](docs/client.md) — the Wails desktop client.
 
 ## Repository layout

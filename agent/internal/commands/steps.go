@@ -21,10 +21,10 @@ import (
 // RegisterBuiltins installs the compose/exec/shell/git step executors and the
 // native commands that ship with the agent. It is safe to call more than once.
 func RegisterBuiltins(g git.Client) {
-	RegisterStep(&ComposeStep{})
-	RegisterStep(&ExecStep{})
-	RegisterStep(&ShellStep{})
-	RegisterStep(&GitStep{client: g})
+	RegisterStep(&ComposeExecutor{})
+	RegisterStep(&ExecExecutor{})
+	RegisterStep(&ShellExecutor{})
+	RegisterStep(&GitExecutor{client: g})
 
 	for _, c := range []Command{
 		&GitCheckCommand{client: g},
@@ -42,17 +42,17 @@ func RegisterBuiltins(g git.Client) {
 
 // ---- compose ----
 
-// ComposeStep runs `docker compose <action>`.
-type ComposeStep struct{}
+// ComposeExecutor runs `docker compose <action>`.
+type ComposeExecutor struct{}
 
-func (s *ComposeStep) StepName() string { return "compose" }
+func (s *ComposeExecutor) StepName() string { return "compose" }
 
-func (s *ComposeStep) Execute(context.Context, *stack.Stack, map[string]string, io.Writer) error {
-	return errors.New("compose step requires configuration")
-}
-
-func (s *ComposeStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[string]string, cfg map[string]any, out io.Writer) error {
-	action := stringValue(cfg["action"])
+func (s *ComposeExecutor) Execute(ctx context.Context, st *stack.Stack, _ map[string]string, step Step, out io.Writer) error {
+	cfg, ok := step.(*ComposeStep)
+	if !ok || cfg == nil {
+		return errors.New("compose step: expected *ComposeStep")
+	}
+	action := cfg.Action
 	switch action {
 	case "build", "up", "down", "restart", "pull", "ps":
 	case "":
@@ -65,33 +65,33 @@ func (s *ComposeStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[st
 	if err != nil {
 		return err
 	}
-	services, err := targetServices(sc.managed, stringSlice(cfg["services"]))
+	services, err := targetServices(sc.managed, cfg.Services)
 	if err != nil {
 		return err
 	}
 	args := []string{action}
-	args = append(args, stringSlice(cfg["flags"])...)
+	args = append(args, cfg.Flags...)
 	args = append(args, services...)
 	return compose.Run(ctx, st.Path, sc.files, out, args...)
 }
 
 // ---- exec ----
 
-// ExecStep runs `docker compose exec -T <service> <command>`.
-type ExecStep struct{}
+// ExecExecutor runs `docker compose exec -T <service> <command>`.
+type ExecExecutor struct{}
 
-func (s *ExecStep) StepName() string { return "exec" }
+func (s *ExecExecutor) StepName() string { return "exec" }
 
-func (s *ExecStep) Execute(context.Context, *stack.Stack, map[string]string, io.Writer) error {
-	return errors.New("exec step requires configuration")
-}
-
-func (s *ExecStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[string]string, cfg map[string]any, out io.Writer) error {
-	service := stringValue(cfg["service"])
+func (s *ExecExecutor) Execute(ctx context.Context, st *stack.Stack, _ map[string]string, step Step, out io.Writer) error {
+	cfg, ok := step.(*ExecStep)
+	if !ok || cfg == nil {
+		return errors.New("exec step: expected *ExecStep")
+	}
+	service := cfg.Service
 	if service == "" {
 		return errors.New("exec step: service is required")
 	}
-	command := stringValue(cfg["command"])
+	command := cfg.Command
 	if strings.TrimSpace(command) == "" {
 		return errors.New("exec step: command is required")
 	}
@@ -110,11 +110,11 @@ func (s *ExecStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[strin
 		return errors.New("exec step: command is empty")
 	}
 	args := []string{"exec", "-T"}
-	if workdir := stringValue(cfg["workdir"]); workdir != "" {
-		args = append(args, "--workdir", workdir)
+	if cfg.Workdir != "" {
+		args = append(args, "--workdir", cfg.Workdir)
 	}
-	for _, key := range sortedKeys(cfg["env"]) {
-		args = append(args, "-e", key+"="+stringValue(cfg["env"].(map[string]any)[key]))
+	for _, key := range sortedKeys(cfg.Env) {
+		args = append(args, "-e", key+"="+cfg.Env[key])
 	}
 	args = append(args, service)
 	args = append(args, argv...)
@@ -123,23 +123,23 @@ func (s *ExecStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[strin
 
 // ---- shell ----
 
-// ShellStep is the raw shell escape hatch (docs/commands.md §2).
-type ShellStep struct{}
+// ShellExecutor is the raw shell escape hatch.
+type ShellExecutor struct{}
 
-func (s *ShellStep) StepName() string { return "shell" }
+func (s *ShellExecutor) StepName() string { return "shell" }
 
-func (s *ShellStep) Execute(context.Context, *stack.Stack, map[string]string, io.Writer) error {
-	return errors.New("shell step requires configuration")
-}
-
-func (s *ShellStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[string]string, cfg map[string]any, out io.Writer) error {
-	command := stringValue(cfg["command"])
+func (s *ShellExecutor) Execute(ctx context.Context, st *stack.Stack, _ map[string]string, step Step, out io.Writer) error {
+	cfg, ok := step.(*ShellStep)
+	if !ok || cfg == nil {
+		return errors.New("shell step: expected *ShellStep")
+	}
+	command := cfg.Command
 	if strings.TrimSpace(command) == "" {
 		return errors.New("shell step: command is required")
 	}
 	dir := st.Path
-	if cwd := stringValue(cfg["cwd"]); cwd != "" {
-		dir = filepath.Join(st.Path, cwd)
+	if cfg.Cwd != "" {
+		dir = filepath.Join(st.Path, cfg.Cwd)
 		abs, err := filepath.Abs(dir)
 		if err != nil {
 			return err
@@ -149,7 +149,7 @@ func (s *ShellStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[stri
 			return err
 		}
 		if abs != root && !strings.HasPrefix(abs, root+string(filepath.Separator)) {
-			return fmt.Errorf("shell step: cwd %q escapes the stack directory", cwd)
+			return fmt.Errorf("shell step: cwd %q escapes the stack directory", cfg.Cwd)
 		}
 		dir = abs
 	}
@@ -171,23 +171,23 @@ func (s *ShellStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[stri
 
 // ---- git ----
 
-// GitStep runs fetch/check/pull through the git.Client.
-type GitStep struct {
+// GitExecutor runs fetch/check/pull through the git.Client.
+type GitExecutor struct {
 	client git.Client
 }
 
-func (s *GitStep) StepName() string { return "git" }
+func (s *GitExecutor) StepName() string { return "git" }
 
-func (s *GitStep) Execute(context.Context, *stack.Stack, map[string]string, io.Writer) error {
-	return errors.New("git step requires configuration")
-}
-
-func (s *GitStep) ExecuteStep(ctx context.Context, st *stack.Stack, _ map[string]string, cfg map[string]any, out io.Writer) error {
+func (s *GitExecutor) Execute(ctx context.Context, st *stack.Stack, _ map[string]string, step Step, out io.Writer) error {
+	cfg, ok := step.(*GitStep)
+	if !ok || cfg == nil {
+		return errors.New("git step: expected *GitStep")
+	}
 	if s.client == nil {
 		return errors.New("git step: no git client configured")
 	}
-	action := stringValue(cfg["action"])
-	branch := stringValue(cfg["branch"])
+	action := cfg.Action
+	branch := cfg.Branch
 	if branch == "" {
 		branch = st.Branch
 	}
@@ -361,11 +361,7 @@ func ensureManaged(managed []string, service string) error {
 	return fmt.Errorf("service %q is not managed by this stack (check allow/exclude policy)", service)
 }
 
-func sortedKeys(v any) []string {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return nil
-	}
+func sortedKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {
 		keys = append(keys, key)

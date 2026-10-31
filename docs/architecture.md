@@ -9,7 +9,8 @@
   deployed as `authorized_keys` on each VPS.
 - **Single binary per server** that is both the agent daemon and the CLI, so the
   same operations work from a terminal and from the desktop app.
-- **Extensible** — new repo commands are added without recompiling the agent.
+- **Extensible** — new repo command profiles are compiled into the agent and
+  keyed by the normalized git remote.
 
 ## 2. Components
 
@@ -29,7 +30,8 @@ agent/  (Go module -> binary: stackman)
      ├─ discovery    UDP beacon responder
      ├─ stack        stack registry (SQLite) + domain logic
      ├─ compose      compose file parsing + allow/deny service policy
-     ├─ commands     command registry (Go interface) + YAML DSL executor
+     ├─ commands     command registry (Go interface) + typed step executors
+     ├─ profiles     repo-specific command sets compiled into the binary
      ├─ git          git operations (fetch/status/pull/check) behind an interface
      └─ systemd      unit generation + install/start/stop/enable/disable
 
@@ -130,7 +132,8 @@ Nothing else is added. HTTPS and SSH ports are not touched.
 - Each agent is authoritative for its own stacks; there is no cross-agent
   coordination or shared state. The client is a pure orchestrator/UI.
 - The SQLite registry is the agent's source of truth for stack registration.
-  Repo-local concerns (which commands exist) live in the repo's `.stackman.yaml`.
+  Repo-specific command sets are compiled into the agent and keyed by the
+  normalized `stacks.remote` value.
 - Git operations take a file lock (or rely on `git`'s own locking) so the daemon
   and CLI can't run `pull` concurrently against the same stack.
 

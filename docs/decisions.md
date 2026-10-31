@@ -64,16 +64,23 @@ this scale).
 grows. **Rejected:** BoltDB (hand-rolled schema/migrations), JSON files (no
 concurrent-write safety).
 
-## ADR-007 — Repo commands: two-level extensibility
+## ADR-007 — Repo commands: compiled-in Go profiles
 
-**Decision:** repo-specific commands are **declarative** in a `.stackman.yaml`
-checked into the repo (a small step DSL: `compose`, `exec`, `shell`, `git`). The
-agent's *own* operations are implemented behind a Go `Command` interface and a
-registry, which the DSL executor itself is built on.
+**Decision:** repo-specific commands are **compiled into the agent** as Go
+`Profile` values under `agent/internal/profiles/`, keyed by the normalized git
+remote (a small step DSL of typed structs: `compose`, `exec`, `shell`, `git`).
+The agent's *own* operations use the same Go `Command`/`StepExecutor` interfaces
+and registry.
 
-**Why:** declarative commands can be added by editing YAML (no rebuild, no Go).
-The Go interface stays available for anything the DSL can't express. See
-`commands.md`.
+**Why:** profiles travel with the binary, are type-checked at build time, and
+cannot drift from the deployed version or be changed by editing files on a VPS.
+There is no parser and no runtime config read. **Consequence:** changing a
+repo's commands requires rebuilding and redeploying the agent; there is no
+per-repo self-service. See `commands.md`.
+
+**Rejected:** a repo-local `.stackman.yaml` read at runtime (untracked config,
+parse failures at runtime, extra trust surface), and embedded YAML (still a
+parser and weaker type safety than Go structs).
 
 ## ADR-008 — Git: shell out to `git`, behind an interface
 

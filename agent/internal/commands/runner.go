@@ -9,31 +9,27 @@ import (
 	"github.com/example/stack-man/agent/internal/stack"
 )
 
-// StepConfigExecutor is implemented by step executors that need the step's
-// YAML config. The base StepExecutor interface is kept small for executors
-// that are fully configured at construction time.
-type StepConfigExecutor interface {
-	StepExecutor
-	ExecuteStep(ctx context.Context, st *stack.Stack, params map[string]string, config map[string]any, out io.Writer) error
-}
-
 // StepProgress is called before each step runs.
 type StepProgress func(step, total int, label string)
 
-// Runner executes .stackman.yaml commands.
+// Runner executes compiled-in profile commands.
 type Runner struct{}
 
-// NewRunner returns a DSL runner.
+// NewRunner returns a profile command runner.
 func NewRunner() *Runner { return &Runner{} }
 
-// Run executes a named command from f, streaming output to out.
-func (r *Runner) Run(ctx context.Context, st *stack.Stack, f *File, name string, given map[string]string, out io.Writer, progress StepProgress) error {
-	def, ok := f.Get(name)
-	if !ok {
-		if f == nil {
-			return fmt.Errorf("commands: %s not found (no %s in %s)", name, FileName, st.Path)
+// Run executes a named command from p, streaming output to out.
+func (r *Runner) Run(ctx context.Context, st *stack.Stack, p *Profile, name string, given map[string]string, out io.Writer, progress StepProgress) error {
+	if p == nil {
+		remote := ""
+		if st != nil {
+			remote = st.Remote
 		}
-		return fmt.Errorf("commands: %q not defined in %s", name, FileName)
+		return fmt.Errorf("commands: %q not found (no profile matches remote %q)", name, remote)
+	}
+	def, ok := p.Get(name)
+	if !ok {
+		return fmt.Errorf("commands: %q not defined in profile %s", name, p.Repo)
 	}
 	params, err := resolveParams(def, given)
 	if err != nil {
@@ -41,46 +37,55 @@ func (r *Runner) Run(ctx context.Context, st *stack.Stack, f *File, name string,
 	}
 	total := len(def.Steps)
 	for i, step := range def.Steps {
-		exec, ok := Step(step.Type)
+		if step == nil {
+			return fmt.Errorf("commands: %s step %d: nil step", name, i+1)
+		}
+		exec, ok := GetStep(step.StepName())
 		if !ok {
-			return fmt.Errorf("commands: step %d: no executor registered for %q", i+1, step.Type)
+			return fmt.Errorf("commands: step %d: no executor registered for %q", i+1, step.StepName())
 		}
-		label := StepLabel(step)
 		if progress != nil {
-			progress(i+1, total, label)
+			progress(i+1, total, StepLabel(step))
 		}
-		if cfgExec, ok := exec.(StepConfigExecutor); ok {
-			cfg := substituteMap(step.Config, params)
-			if err := cfgExec.ExecuteStep(ctx, st, params, cfg, out); err != nil {
-				return fmt.Errorf("commands: %s step %d (%s): %w", name, i+1, step.Type, err)
-			}
-			continue
-		}
-		if err := exec.Execute(ctx, st, params, out); err != nil {
-			return fmt.Errorf("commands: %s step %d (%s): %w", name, i+1, step.Type, err)
+		step = step.Substitute(params)
+		if err := exec.Execute(ctx, st, params, step, out); err != nil {
+			return fmt.Errorf("commands: %s step %d (%s): %w", name, i+1, step.StepName(), err)
 		}
 	}
 	return nil
 }
 
 // StepLabel is a human-readable summary for progress notifications.
-func StepLabel(step YAMLStep) string {
-	switch step.Type {
-	case "compose":
-		action := stringValue(step.Config["action"])
-		services := stringSlice(step.Config["services"])
-		if len(services) > 0 {
-			return fmt.Sprintf("docker compose %s %s", action, strings.Join(services, " "))
+func StepLabel(step Step) string {
+	if step == nil {
+		return ""
+	}
+	switch s := step.(type) {
+	case *ComposeStep:
+		if s == nil {
+			return "compose"
 		}
-		return "docker compose " + action
-	case "exec":
-		return fmt.Sprintf("docker compose exec %s %s", stringValue(step.Config["service"]), stringValue(step.Config["command"]))
-	case "shell":
-		return "shell: " + stringValue(step.Config["command"])
-	case "git":
-		return "git " + stringValue(step.Config["action"])
+		if len(s.Services) > 0 {
+			return fmt.Sprintf("docker compose %s %s", s.Action, strings.Join(s.Services, " "))
+		}
+		return "docker compose " + s.Action
+	case *ExecStep:
+		if s == nil {
+			return "exec"
+		}
+		return fmt.Sprintf("docker compose exec %s %s", s.Service, s.Command)
+	case *ShellStep:
+		if s == nil {
+			return "shell"
+		}
+		return "shell: " + s.Command
+	case *GitStep:
+		if s == nil {
+			return "git"
+		}
+		return "git " + s.Action
 	default:
-		return step.Type
+		return step.StepName()
 	}
 }
 
@@ -110,47 +115,6 @@ func resolveParams(def Def, given map[string]string) (map[string]string, error) 
 	return out, nil
 }
 
-func substituteMap(cfg map[string]any, params map[string]string) map[string]any {
-	if cfg == nil {
-		return nil
-	}
-	out := make(map[string]any, len(cfg))
-	for k, v := range cfg {
-		out[k] = substituteValue(v, params)
-	}
-	return out
-}
-
-func substituteValue(v any, params map[string]string) any {
-	switch value := v.(type) {
-	case string:
-		out := value
-		for name, replacement := range params {
-			out = strings.ReplaceAll(out, "${"+name+"}", replacement)
-		}
-		return out
-	case map[string]any:
-		return substituteMap(value, params)
-	case []any:
-		out := make([]any, len(value))
-		for i, item := range value {
-			out[i] = substituteValue(item, params)
-		}
-		return out
-	case []string:
-		out := make([]string, len(value))
-		for i, item := range value {
-			out[i] = item
-			for name, replacement := range params {
-				out[i] = strings.ReplaceAll(out[i], "${"+name+"}", replacement)
-			}
-		}
-		return out
-	default:
-		return v
-	}
-}
-
 func contains(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {
@@ -158,34 +122,4 @@ func contains(items []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func stringValue(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprint(v)
-}
-
-func stringSlice(v any) []string {
-	switch value := v.(type) {
-	case []string:
-		return value
-	case []any:
-		out := make([]string, 0, len(value))
-		for _, item := range value {
-			out = append(out, fmt.Sprint(item))
-		}
-		return out
-	case string:
-		if value == "" {
-			return nil
-		}
-		return []string{value}
-	default:
-		return nil
-	}
 }

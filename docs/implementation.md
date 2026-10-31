@@ -33,7 +33,8 @@ placeholder. Search-and-replace it with your real repo path across **all**
   and `git.Client` are already defined. Implement *behind* them; don't change
   their signatures casually.
 - **No shell string concatenation for args.** Pass argv slices to compose/git;
-  the only raw-string escape hatch is the `shell` step in `.stackman.yaml`.
+  the only raw-string escape hatch is the `shell` step in a compiled repo
+  profile.
 - **CLI and daemon share one service layer.** Implement each operation once in
   `internal/`, then expose it from both `cli` and `daemon`.
 
@@ -50,9 +51,9 @@ placeholder. Search-and-replace it with your real repo path across **all**
    enumerate services, apply policy. → docs/stacks.md §3.
 5. **git** — implement `git.Client` via the system `git` binary; the
    check-before-pull + conflict-refusal logic. → docs/stacks.md §6.
-6. **commands** — YAML DSL loader (`.stackman.yaml`) + `StepExecutor`s
-   (compose/exec/shell/git) + the `backup`/`update` builtins.
-   → docs/commands.md.
+6. **commands** — typed repo-profile registry keyed by normalized remote +
+   `StepExecutor`s (compose/exec/shell/git) + native builtins. No YAML and no
+   runtime config read. → docs/commands.md.
 7. **cli** — wire cobra subcommands to the above; make `runCLI` dispatch here.
    → docs/agent.md §1.
 

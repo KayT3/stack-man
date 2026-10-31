@@ -9,7 +9,7 @@ shape now, and the frontend is a thin skin over it.
 - Authenticate to each agent with your SSH key (challenge-response).
 - List stacks, inspect services/policy.
 - Run git checks (show changed files before pulling), pulls, container ops, and
-  repo commands.
+  profile commands.
 - Stream logs/progress from long-running commands.
 
 ## 2. Layout

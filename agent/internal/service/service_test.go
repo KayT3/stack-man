@@ -1,13 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/example/stack-man/agent/internal/commands"
 	"github.com/example/stack-man/agent/internal/config"
 	"github.com/example/stack-man/agent/internal/stack"
 )
@@ -128,6 +131,62 @@ services:
 	list, err := svc.ListStacks(context.Background())
 	if err != nil || len(list) != 1 || list[0].Name != "demo" {
 		t.Fatalf("ListStacks = %v, %v", list, err)
+	}
+}
+
+func TestProfileCommands(t *testing.T) {
+	commands.RegisterProfile(commands.Profile{
+		Repo: "github.com/stackman-tests/service-profile",
+		Commands: map[string]commands.Def{
+			"hello": {
+				Description: "Say hello",
+				Steps:       []commands.Step{&commands.ShellStep{Command: "echo hello"}},
+			},
+		},
+	})
+
+	svc := testService(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "compose.yml"), []byte(`
+services:
+  app: {image: app}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, dir)
+	st, _, err := svc.AddStack(context.Background(), AddOptions{
+		Path:   dir,
+		Name:   "profile-demo",
+		Remote: "git@github.com:Stackman-Tests/Service-Profile.git",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	infos, err := svc.ListCommands(context.Background(), st.Name)
+	if err != nil {
+		t.Fatalf("ListCommands: %v", err)
+	}
+	var found bool
+	for _, info := range infos {
+		if info.Name != "hello" {
+			continue
+		}
+		found = true
+		if info.Source != "profile" || info.Description != "Say hello" {
+			t.Fatalf("hello = %+v", info)
+		}
+	}
+	if !found {
+		t.Fatalf("profile command missing from %+v", infos)
+	}
+
+	var out bytes.Buffer
+	if err := svc.RunCommand(context.Background(), st.Name, "hello", nil, &out, nil); err != nil {
+		t.Fatalf("RunCommand: %v", err)
+	}
+	if !strings.Contains(out.String(), "hello") {
+		t.Fatalf("out = %q", out.String())
 	}
 }
 

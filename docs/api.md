@@ -173,7 +173,7 @@ error `{ "code": -32010, "message": "conflict; pull aborted" }`.
 | `stack.containers.network_connect` | `{ name, network, services[] }` | `{ ok }` |
 | `stack.containers.network_disconnect` | `{ name, network, services[] }` | `{ ok }` |
 
-### Repo commands
+### Profile commands
 
 | Method | Params | Result |
 |--------|--------|--------|

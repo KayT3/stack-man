@@ -1,7 +1,8 @@
-// Package commands defines the Command/StepExecutor extension points and the
-// registry (docs/commands.md). New native commands implement Command and call
-// Register in init(); new YAML step types implement StepExecutor and call
-// RegisterStep.
+// Package commands defines the Command/StepExecutor extension points, the
+// compiled-in repo profile registry, and the native command registry
+// (docs/commands.md). Native commands implement Command and call Register in
+// init(); repo profiles call RegisterProfile; new step types implement Step and
+// StepExecutor.
 package commands
 
 import (
@@ -37,12 +38,22 @@ type Command interface {
 	Run(ctx context.Context, st *stack.Stack, params map[string]string, out io.Writer) error
 }
 
-// StepExecutor runs one step of a declarative .stackman.yaml command
-// (compose, exec, shell, git). See docs/commands.md §2.
-type StepExecutor interface {
-	// StepName returns the YAML key this executor handles (e.g. "exec").
+// Step is one action in a compiled-in profile command (compose, exec, shell,
+// git). Exactly one concrete step type describes the action.
+type Step interface {
+	// StepName returns the executor key for this step (e.g. "exec").
 	StepName() string
-	Execute(ctx context.Context, st *stack.Stack, params map[string]string, out io.Writer) error
+	// Substitute returns a copy with ${param} placeholders expanded.
+	Substitute(params map[string]string) Step
+}
+
+// StepExecutor runs one concrete Step (compose, exec, shell, git). See
+// docs/commands.md §2.
+type StepExecutor interface {
+	// StepName returns the step type this executor handles (e.g. "exec").
+	StepName() string
+	// Execute runs step, streaming output to out.
+	Execute(ctx context.Context, st *stack.Stack, params map[string]string, step Step, out io.Writer) error
 }
 
 // registry is the process-wide command registry.
@@ -82,8 +93,8 @@ func Names() []string {
 	return out
 }
 
-// Step returns a registered step executor by YAML key.
-func Step(name string) (StepExecutor, bool) {
+// GetStep returns a registered step executor by step name.
+func GetStep(name string) (StepExecutor, bool) {
 	s, ok := registry.steps[name]
 	return s, ok
 }

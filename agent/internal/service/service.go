@@ -16,6 +16,7 @@ import (
 	"github.com/example/stack-man/agent/internal/compose"
 	"github.com/example/stack-man/agent/internal/config"
 	"github.com/example/stack-man/agent/internal/git"
+	_ "github.com/example/stack-man/agent/internal/profiles"
 	"github.com/example/stack-man/agent/internal/stack"
 )
 
@@ -261,11 +262,11 @@ func (s *Service) GitPull(ctx context.Context, name string, out io.Writer, progr
 }
 
 func (s *Service) runOnPull(ctx context.Context, st *stack.Stack, out io.Writer, progress commands.StepProgress) error {
-	f, err := commands.Load(st.Path)
-	if err != nil || f == nil || f.OnPull == "" {
-		return err
+	p := commands.ProfileFor(st.Remote)
+	if p == nil || p.OnPull == "" {
+		return nil
 	}
-	return commands.NewRunner().Run(ctx, st, f, f.OnPull, nil, out, progress)
+	return commands.NewRunner().Run(ctx, st, p, p.OnPull, nil, out, progress)
 }
 
 // CommandInfo describes a command available on a stack.
@@ -273,28 +274,25 @@ type CommandInfo struct {
 	Name        string
 	Description string
 	Params      []commands.Param
-	Source      string // "repo" or "builtin"
+	Source      string // "profile" or "builtin"
 }
 
-// ListCommands merges .stackman.yaml commands with native built-ins.
+// ListCommands merges the stack's compiled-in profile with native built-ins.
 func (s *Service) ListCommands(ctx context.Context, name string) ([]CommandInfo, error) {
 	st, err := s.Store.Get(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	f, err := commands.Load(st.Path)
-	if err != nil {
-		return nil, err
-	}
+	p := commands.ProfileFor(st.Remote)
 	var out []CommandInfo
 	seen := map[string]struct{}{}
-	for _, cmdName := range f.Names() {
-		def, _ := f.Get(cmdName)
+	for _, cmdName := range p.Names() {
+		def, _ := p.Get(cmdName)
 		out = append(out, CommandInfo{
 			Name:        cmdName,
 			Description: def.Description,
 			Params:      def.Spec().Params,
-			Source:      "repo",
+			Source:      "profile",
 		})
 		seen[cmdName] = struct{}{}
 	}
@@ -317,7 +315,7 @@ func (s *Service) ListCommands(ctx context.Context, name string) ([]CommandInfo,
 	return out, nil
 }
 
-// RunCommand runs either a repo command or a native command.
+// RunCommand runs either a profile command or a native command.
 func (s *Service) RunCommand(ctx context.Context, name, command string, params map[string]string, out io.Writer, progress commands.StepProgress) error {
 	st, err := s.Store.Get(ctx, name)
 	if err != nil {
@@ -326,20 +324,17 @@ func (s *Service) RunCommand(ctx context.Context, name, command string, params m
 	if out == nil {
 		out = io.Discard
 	}
-	f, err := commands.Load(st.Path)
-	if err != nil {
-		return err
-	}
-	if _, ok := f.Get(command); ok {
-		return commands.NewRunner().Run(ctx, st, f, command, params, out, progress)
+	p := commands.ProfileFor(st.Remote)
+	if _, ok := p.Get(command); ok {
+		return commands.NewRunner().Run(ctx, st, p, command, params, out, progress)
 	}
 	if cmd, ok := commands.Get(command); ok {
 		return cmd.Run(ctx, st, params, out)
 	}
-	if f == nil {
-		return fmt.Errorf("command %q not found (no %s in %s)", command, commands.FileName, st.Path)
+	if p == nil {
+		return fmt.Errorf("command %q not found (no profile matches remote %q)", command, st.Remote)
 	}
-	return fmt.Errorf("command %q not found", command)
+	return fmt.Errorf("command %q not found in profile %s or built-ins", command, p.Repo)
 }
 
 // ---- compose helpers ----

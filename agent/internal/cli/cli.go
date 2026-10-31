@@ -579,7 +579,7 @@ func containersCommand(configPath *string) *cobra.Command {
 func repoCommand(configPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "command",
-		Short: "Run repo-defined and built-in commands",
+		Short: "Run profile-defined and built-in commands",
 	}
 
 	listCmd := &cobra.Command{
@@ -629,7 +629,7 @@ func repoCommand(configPath *string) *cobra.Command {
 	var rawParams []string
 	runCmd := &cobra.Command{
 		Use:   "run <name> <command>",
-		Short: "Run a repo or built-in command",
+		Short: "Run a profile or built-in command",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params, err := parseParams(rawParams)

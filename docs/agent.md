@@ -58,7 +58,7 @@ stackman containers network connect    <name> <network> [service...]
 stackman containers network disconnect <name> <network> [service...]
 ```
 
-### 1.5 Repo commands
+### 1.5 Profile commands
 
 ```
 stackman command list <name>
@@ -169,5 +169,5 @@ On SIGTERM (systemd stop): graceful drain of connections, then exit.
   functions, so anything you can do in a terminal you can do from the desktop app.
 - **No shell injection.** Compose service names, command args, and remote URLs are
   passed as argv (not concatenated into a shell string). The `shell` step type in
-  `.stackman.yaml` is the only place raw strings run, and it's explicitly marked
-  as an escape hatch.
+  a compiled repo profile is the only place raw strings run, and it's explicitly
+  marked as an escape hatch.

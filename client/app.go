@@ -245,7 +245,7 @@ func (a *App) ContainersLogs(agentID, stack, service string, follow bool) error 
 	return a.call(agentID, api.MethodContainersLogs, params, nil, 0)
 }
 
-// ListCommands lists repo and built-in commands.
+// ListCommands lists profile and built-in commands.
 func (a *App) ListCommands(agentID, stack string) ([]api.CommandInfo, error) {
 	var out []api.CommandInfo
 	err := a.call(agentID, api.MethodCommandList, map[string]string{"name": stack}, &out, 30*time.Second)

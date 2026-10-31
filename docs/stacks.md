@@ -92,8 +92,9 @@ CREATE TABLE stack_services (
 ```
 
 - The DB is the **source of truth** for registration and service policy.
-- Repo *commands* are **not** stored here — they live in the repo (`.stackman.yaml`),
-  because they travel with the code and are versioned. See `commands.md`.
+- Repo *commands* are **not** stored here — they are compiled into the agent as
+  profiles keyed by the normalized `remote` value, so they travel with the
+  binary. See `commands.md`.
 
 ## 5. Where Compose files and overrides live
 
