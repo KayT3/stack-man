@@ -4,6 +4,26 @@ This is the entry point for whichever model implements the code. The scaffold
 compiles as-is; every stub returns `config.ErrNotImplemented` or exits with a
 "not implemented" message. Fill in the TODOs in the order below.
 
+## Current status and next action
+
+| Phase | State |
+|---|---|
+| 1 — Agent core | in progress |
+| 2 — Daemon | in progress |
+| 3 — Client core (Go) | **done** — `App`, discovery, `AgentConnection`, keys, config all exist |
+| 4 — Native Windows UI | **specified, not started** → `docs/client-native.md` |
+| 5 — Wails/Svelte skin | exists; legacy fallback, do not extend |
+
+**Next action: implement M0 of `docs/client-native.md`.** That document is the
+plan of record for the UI: a WinUI 3 (C#) app hosting the Go client as a
+`-buildmode=c-shared` DLL, one process, JSON over four exported C functions.
+It contains the ABI, the method table, the threading rules, the file layout,
+the acceptance test per milestone, and a copy-paste prompt you can hand
+directly to a model.
+
+Do not start Phase 4 by writing XAML. Start with `client/ipc.go` (pure Go, no
+cgo, unit-tested) — see M0.
+
 ## Build & verify
 
 ```bash
@@ -12,6 +32,16 @@ go build ./agent/... ./pkg/... ./client/...
 go vet   ./agent/... ./pkg/... ./client/...
 go test  ./agent/... ./pkg/... ./client/...
 ```
+
+That is the **cgo-free** gate and must always pass. The WinUI backend DLL is a
+separate, opt-in build that needs a C compiler:
+
+```bash
+cd client && CGO_ENABLED=1 go build -buildmode=c-shared -tags cshared \
+  -o ../desktop/StackMan/Native/stackman-backend.dll .
+```
+
+See `docs/client-native.md` §1.9 before running it the first time.
 
 (You can also `cd agent && go build ./...` — the `replace` directives make
 each module build independently of the workspace.)
@@ -74,17 +104,51 @@ placeholder. Search-and-replace it with your real repo path across **all**
 **Acceptance:** a test client (or the CLI speaking RPC) authenticates with an
 SSH key and drives a stack over the private subnet.
 
-## Phase 3 — Client core
+## Phase 3 — Client core (done)
 
-11. Scaffold Wails (`wails init` in `client/`), keep the `pkg` dependency.
+11. ~~Scaffold Wails~~ — done; `client/` is a Wails app with `pkg` wired in.
     → docs/client.md §2.
-12. Discovery client + static list; `AgentConnection` (dial + handshake +
-    `Call`/`Notify`). → docs/client.md §4.
-13. Bind the `App` methods (listed in docs/client.md §4) to agent connections.
+12. ~~Discovery client + static list; `AgentConnection` (dial + handshake +
+    `Call`/`Notify`)~~ — done. → docs/client.md §4.
+13. ~~Bind the `App` methods to agent connections~~ — done; the full method
+    surface is in `client/app.go`. This is the surface Phase 4 exposes over the
+    DLL, so do not change its signatures without updating
+    `docs/client-native.md` §1.5.
 
-## Phase 4 — UI
+## Phase 4 — Native Windows UI (WinUI 3 + Go DLL)
 
-14. Svelte dashboard (agents → stack → services → command runner).
+All detail lives in **`docs/client-native.md`**. Summary of the order:
+
+14. **M0 — dispatcher, no cgo.** `client/ipc.go`: `Dispatcher.Call([]byte) []byte`,
+    `PollEvents`, bounded event queue, `Emitter` impl. Unit-tested.
+    → client-native.md §1.6–1.7, §1.10.
+15. **M1 — the DLL.** `client/backend_cshared.go` behind
+    `//go:build windows && cshared`, exporting `SM_Init`, `SM_Call`,
+    `SM_PollEvents`, `SM_Free`. Also change `client/main.go` to
+    `//go:build !wails && !cshared`. Prove it with a throwaway C# console app
+    and `dumpbin /dependents`.
+16. **M2 — WinUI shell.** `desktop/StackMan/`, unpackaged, Mica backdrop,
+    `NavigationView` + `Frame`, empty pages.
+17. **M3–M4 — wire the UI.** `BackendClient` (async, `LongRunning`),
+    `EventPump` (long-poll → `DispatcherQueue`), Agents → Stack list → Stack
+    detail → output pane.
+18. **M5 — polish.** Job pill, `ContentDialog`, `InfoBar`, ThemeResource-only
+    colours, light/dark/high-contrast, 150% DPI.
+19. **M6 — package.** `make desktop`, folder output, self-contained WinAppSDK.
+
+**Acceptance:** a `stackman-desktop.exe` that opens with no webview, follows
+the system theme, lists agents found over WARP, runs a build with live streamed
+output, and shows a job started in a previous window session.
+
+**Rules for this phase:** only `char*` JSON across the ABI; `recover()` in
+every export; no `log.Fatal`/`os.Exit` in `client/`; never call the DLL from
+the UI thread; never touch WinUI from Go.
+
+## Phase 5 — Wails/Svelte skin (legacy, frozen)
+
+20. Keep `main_wails.go`, `frontend/` and the `wails` build tag working so the
+    old UI stays runnable (`make client`) as a fallback. Fix bugs, add no
+    features. Delete only after the native client has had real use.
     → docs/client.md §5.
 
 ## Where to look when stuck
@@ -95,4 +159,6 @@ SSH key and drives a stack over the private subnet.
 | Extensibility contracts | `agent/internal/{commands,git}` |
 | Domain model + policy | `agent/internal/stack` |
 | Config schema | `agent/internal/config` + docs/agent.md §3 |
-| Why a decision was made | `docs/decisions.md` |
+| Client backend surface | `docs/client.md` §4 + `client/app.go` |
+| UI plan, Go DLL ABI, WinUI layout | **`docs/client-native.md`** |
+| Why a decision was made | `docs/decisions.md` (ADR-011 for the native UI) |

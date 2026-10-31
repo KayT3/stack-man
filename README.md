@@ -21,7 +21,7 @@ exposing the management API to the public internet.
 | Component | What it is | Where it runs |
 |-----------|-----------|----------------|
 | **`stackman` agent** | One Go binary. CLI (`config`, `install`, `stack add`, git/container/command ops) **and** daemon (`stackman daemon` — private RPC API). | Each VPS |
-| **`stackman-desktop` client** | Go + Wails desktop app. Auto-discovers agents, authenticates with your SSH key, drives stacks. | Your laptop |
+| **`stackman-desktop` client** | Go backend + native WinUI 3 (C#) front end, one process. Auto-discovers agents, authenticates with your SSH key, drives stacks. | Your laptop |
 | **`pkg/`** | Shared Go module: auth, discovery, and RPC message types used by both agent and client. | Library |
 
 ## The mental model

@@ -13,6 +13,10 @@ once we needed a standalone binary + native SSH support.)
 
 ## ADR-002 — Client: Go + Wails
 
+> **Partially superseded by ADR-011.** The Go backend and `pkg/` sharing
+> stand; the Wails *webview UI* is replaced by a native WinUI 3 front end. The
+> Wails skin is kept as a frozen fallback.
+
 **Decision:** the desktop app is Go with Wails (webview UI), frontend in Svelte.
 
 **Why:** same language as the agent, so we can share `pkg/` types and RPC code.
@@ -119,3 +123,50 @@ visible after reconnect so the UI can show them and avoid retrying a mutation.
 **Rejected:** tying mutations to the connection (the previous failure mode), and
 outsourcing detachment to `systemd-run`/Docker retries (opaque, and progress
 cannot be reported).
+
+## ADR-011 — Desktop UI: native WinUI 3 in C#, Go backend as a c-shared DLL
+
+**Decision:** the desktop client becomes one process: a C# / .NET / WinUI 3
+host executable that loads the existing Go client code as
+`stackman-backend.dll` (`go build -buildmode=c-shared`). The ABI is four
+functions — `SM_Init`, `SM_Call`, `SM_PollEvents`, `SM_Free` — exchanging UTF-8
+JSON envelopes. Notifications use a blocking long-poll instead of cgo
+callbacks. Plan of record: `docs/client-native.md`.
+
+**Why:** we wanted two things at once — no webview (native text, scroll, focus,
+IME, sub-200 ms startup) and a genuinely stock Windows 11 look (Mica,
+NavigationView, ThemeResource colours, system theme and accent). Only real
+WinUI 3 delivers both, and only C# gives real XAML, XAML Hot Reload, and
+Microsoft's samples verbatim — which is exactly the fast design loop that
+polish work needs.
+
+Keeping the backend in Go is the point: discovery, the SSH challenge-response,
+and key custody stay in one audited implementation and never enter .NET. The
+`App` surface in `client/app.go` was already Wails-free behind an `Emitter`
+interface (ADR-002), so the process-internal bridge is a thin transport, not a
+port.
+
+**Rejected:**
+
+- *WinUI 3 from Go (`go-bindings-windowsappsdk`).* No XAML compiler (UI built
+  imperatively), no deriving from `Page`/`UserControl` (its M7 is open), amd64
+  only, one maintainer, and every layout tweak is a recompile with no preview.
+  Wrong tool for a pixel-polish phase.
+- *Windigo (pure-Go Win32).* Fixes the webview, but exposes the classic
+  comctl32 control set: no Mica, no ThemeResource, no dark mode in its `ui`
+  package, WinForms-style anchor layout. Looks older, not native-newer.
+- *Porting the client logic to C#.* Would duplicate the SSH handshake and key
+  custody — the highest-risk code in the project — across two languages.
+- *Two processes (Go sidecar + stdio JSON-RPC).* Viable and cheaper to build;
+  rejected only because it adds readiness handshakes, orphan handling, and
+  two-binary packaging for no crash-isolation benefit we care about. Kept as
+  the documented fallback, and the transport is isolated so switching is cheap.
+- *C# as a NativeAOT library called from a Go host.* WinUI 3 requires the .NET
+  app to own the entry point; NativeAOT is unsupported for WinUI.
+
+**Consequences:** cgo (and therefore a C toolchain) enters the client build;
+the shipped artefact is a folder, not a single file, because WinUI 3 cannot be
+`PublishSingleFile` (`resources.pri` and the WinAppSDK binaries must be on
+disk); self-contained deployment is ~80–120 MB; a Go panic that escapes
+`recover()` now takes down the UI process. The Wails/Svelte skin is frozen but
+retained until the native client has seen real use.

@@ -3,6 +3,11 @@
 Go + Wails desktop app. UI is intentionally last — this doc fixes the backend
 shape now, and the frontend is a thin skin over it.
 
+> **The UI is being replaced by native WinUI 3.** `docs/client-native.md` is the
+> plan of record: a C# host loading this Go code as a `c-shared` DLL, one
+> process. Everything below about the *backend* (§3, §4, §6) still applies
+> verbatim; §5 and the Wails parts of §7 describe the frozen legacy skin.
+
 ## 1. Responsibilities
 
 - Discover agents (UDP beacon + static list).
@@ -16,15 +21,18 @@ shape now, and the frontend is a thin skin over it.
 
 ```
 client/
-├── main.go              # Wails entry
+├── main.go              # headless stub (!wails && !cshared)
+├── main_wails.go        # Wails entry (wails)
 ├── app.go               # App struct with bound methods (the "backend")
+├── ipc.go               # Dispatcher + event queue — transport-agnostic (see client-native.md)
+├── backend_cshared.go   # c-shared DLL exports (windows && cshared)
 ├── wails.json           # Wails project config
 ├── internal/
 │   ├── config/          # client config (agent list, key path, agent use)
 │   ├── discovery/       # beacon client + static list merge
 │   ├── agent/           # AgentConnection: TCP + handshake + JSON-RPC
 │   └── state/           # in-memory model exposed to the frontend
-└── frontend/            # Svelte app
+└── frontend/            # Svelte app (legacy skin)
 ```
 
 The shared wire types come from `pkg/` (`auth`, `discovery`, `api`), so the
@@ -103,10 +111,16 @@ means every managed service, otherwise only the named services are touched.
 `Jobs` lists mutations still running on the agent, including ones started before
 the client reconnected.
 
-Long-running calls emit `EventsOn("stream")` events that the frontend subscribes
-to for live output.
+Long-running calls emit `stream` events for live output. Under Wails that is
+`EventsOn("stream")`; under the native client the same payload arrives from
+`SM_PollEvents` (see `docs/client-native.md` §1.4). The event name and body are
+identical in both, so the UI work is not duplicated logic.
 
-## 5. Frontend (Svelte)
+## 5. Frontend (Svelte) — legacy skin
+
+> **Frozen.** Do not add features here. The native WinUI 3 client in
+> `docs/client-native.md` is the replacement; this section documents what the
+> old UI did so behaviour is not lost in the port.
 
 A single dashboard, kept minimal for now:
 
@@ -140,12 +154,17 @@ is enabled.
 
 ## 7. Platform notes
 
-- Wails targets Windows/macOS/Linux; the client is most useful on the laptop
-  running the WARP client (so it has a subnet IP).
-- Build: `wails build -tags wails` inside `client/`, or `make client` from the
-  repo root. The `wails` tag selects `main_wails.go`; without it the build is a
-  headless stub. The webview needs the Wails runtime on Windows (bundled
-  automatically).
+- The native client is **Windows x64 only** (WinUI 3 + Windows App SDK). The Go
+  backend inside it is portable, so a future shell for another OS would only
+  replace the front end. The client is most useful on the laptop running the
+  WARP client (so it has a subnet IP).
+- Native build: `go build -buildmode=c-shared -tags cshared` produces
+  `stackman-backend.dll`; the C# app in `desktop/` loads it. Full instructions,
+  including the gcc prerequisite, are in `docs/client-native.md` §1.9 and §2.5.
+- Legacy build: `wails build -tags wails` inside `client/`, or `make client`.
+  The `wails` tag selects `main_wails.go`; `cshared` selects
+  `backend_cshared.go`; neither is set by default, so a plain `go build` is a
+  headless stub. The three tags are mutually exclusive.
 
 ## 8. What's deferred to the UI phase (by design)
 
