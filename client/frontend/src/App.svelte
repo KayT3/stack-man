@@ -22,11 +22,13 @@
   let jobs = [];
   let pollTimer;
   let pollingContainers = false;
+  let selectionLoadedFor = '';
   let outputEl;
 
   $: runningJobs = jobs.filter((j) => !stack || j.stack === stack.name);
   $: byService = new Map(containers.map((c) => [c.service, c]));
   $: runningCount = containers.filter((c) => c.state === 'running').length;
+  $: persistSelection(agent, stack, selectedServices, selectionLoadedFor);
 
   onMount(() => {
     const off = api.onStream(handleStream);
@@ -72,6 +74,10 @@
     try {
       services = (await api.StackServices(agent.id, stack.name)) || [];
       commands = (await api.ListCommands(agent.id, stack.name)) || [];
+      const allowed = new Set(
+        services.filter((s) => s.policy !== 'exclude').map((s) => s.service)
+      );
+      selectedServices = selectedServices.filter((name) => allowed.has(name));
       await refreshContainers();
     } catch (e) {
       error = typeof e === 'string' ? e : e && e.message ? e.message : String(e);
@@ -111,6 +117,33 @@
     }
   }
 
+  function selectionKey(agentID, stackName) {
+    return `stackman.selection.${agentID}.${stackName}`;
+  }
+
+  function readSelection(agentID, stackName) {
+    try {
+      const raw = localStorage.getItem(selectionKey(agentID, stackName));
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((name) => typeof name === 'string') : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Persists only after the saved selection has been loaded for this stack, so
+  // switching stacks cannot overwrite the stored picks with an empty array.
+  function persistSelection(agentRef, stackRef, picked, loadedFor) {
+    if (!agentRef || !stackRef) return;
+    const key = selectionKey(agentRef.id, stackRef.name);
+    if (loadedFor !== key) return;
+    try {
+      localStorage.setItem(key, JSON.stringify(picked || []));
+    } catch (e) {
+      // Storage unavailable; the selection still works for this session.
+    }
+  }
+
   async function refreshAgents() {
     agents = (await api.ListAgents()) || [];
     if (agents.length && !agent) {
@@ -129,6 +162,8 @@
     containers = [];
     check = null;
     selectedCommand = null;
+    selectedServices = [];
+    selectionLoadedFor = '';
     try {
       const info = await api.AgentInfo(next.id);
       agent = { ...agent, hostname: info.hostname || agent.hostname, reachable: true };
@@ -149,10 +184,16 @@
     check = null;
     selectedCommand = null;
     selectedServices = [];
+    selectionLoadedFor = '';
     containers = [];
     await run(`inspect ${next.name}`, async () => {
       services = (await api.StackServices(agent.id, next.name)) || [];
       commands = (await api.ListCommands(agent.id, next.name)) || [];
+      const allowed = new Set(
+        services.filter((s) => s.policy !== 'exclude').map((s) => s.service)
+      );
+      selectedServices = readSelection(agent.id, next.name).filter((name) => allowed.has(name));
+      selectionLoadedFor = selectionKey(agent.id, next.name);
       await refreshContainers();
     });
   }
@@ -374,7 +415,7 @@
 
           <div class="card">
             <h3>Containers</h3>
-            <p class="muted small">Pick services for Up / Build / Restart / Down. None selected means all managed services.</p>
+            <p class="muted small">Pick services for Up / Build / Restart / Down. None selected means all managed services; picks are remembered per stack.</p>
             <div class="picker">
               {#each services as service}
                 <label class="chip" class:off={service.policy === 'exclude'}>
