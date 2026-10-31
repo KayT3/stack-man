@@ -20,20 +20,29 @@
   let followLogs = false;
   let selectedServices = [];
   let jobs = [];
-  let jobTimer;
+  let pollTimer;
+  let pollingContainers = false;
   let outputEl;
 
   $: runningJobs = jobs.filter((j) => !stack || j.stack === stack.name);
+  $: byService = new Map(containers.map((c) => [c.service, c]));
+  $: runningCount = containers.filter((c) => c.state === 'running').length;
 
   onMount(() => {
     const off = api.onStream(handleStream);
     run('scan agents', refreshAgents);
-    jobTimer = setInterval(refreshJobs, 4000);
+    pollTimer = setInterval(pollLive, 6000);
     return () => {
-      clearInterval(jobTimer);
+      clearInterval(pollTimer);
       if (typeof off === 'function') off();
     };
   });
+
+  async function pollLive() {
+    if (!agent || document.hidden) return;
+    await refreshJobs();
+    if (!busy) await refreshContainers();
+  }
 
   async function refreshJobs() {
     if (!agent) return;
@@ -42,6 +51,30 @@
     } catch (e) {
       // Discovery/connection errors are surfaced by explicit actions; polling
       // should stay quiet.
+    }
+  }
+
+  async function refreshContainers() {
+    if (!agent || !stack || pollingContainers) return;
+    pollingContainers = true;
+    try {
+      containers = (await api.ContainersPs(agent.id, stack.name)) || [];
+    } catch (e) {
+      // Keep the last known status; the next poll retries.
+    } finally {
+      pollingContainers = false;
+    }
+  }
+
+  // Reloads the service/policy/command lists and current container status.
+  async function refreshStatus() {
+    if (!agent || !stack) return;
+    try {
+      services = (await api.StackServices(agent.id, stack.name)) || [];
+      commands = (await api.ListCommands(agent.id, stack.name)) || [];
+      await refreshContainers();
+    } catch (e) {
+      error = typeof e === 'string' ? e : e && e.message ? e.message : String(e);
     }
   }
 
@@ -74,7 +107,7 @@
       append(`error: ${error}\n`);
     } finally {
       busy = false;
-      refreshJobs();
+      pollLive();
     }
   }
 
@@ -116,11 +149,11 @@
     check = null;
     selectedCommand = null;
     selectedServices = [];
+    containers = [];
     await run(`inspect ${next.name}`, async () => {
       services = (await api.StackServices(agent.id, next.name)) || [];
       commands = (await api.ListCommands(agent.id, next.name)) || [];
-      containers = [];
-      await refreshJobs();
+      await refreshContainers();
     });
   }
 
@@ -173,7 +206,7 @@
   }
 
   async function afterContainerOp() {
-    containers = (await api.ContainersPs(agent.id, stack.name)) || [];
+    await refreshContainers();
     await refreshJobs();
   }
 
@@ -181,10 +214,19 @@
     return selectedServices.length ? ` ${selectedServices.join(' ')}` : '';
   }
 
-  async function doPs() {
-    await run(`containers ps ${stack.name}`, async () => {
-      containers = (await api.ContainersPs(agent.id, stack.name)) || [];
-    });
+  function serviceState(service) {
+    const c = byService.get(service);
+    if (!c) return 'none';
+    const state = (c.state || '').toLowerCase();
+    if (state === 'running') return 'up';
+    if (state === 'exited' || state === 'dead') return 'down';
+    return 'wait';
+  }
+
+  function serviceDetail(service) {
+    const c = byService.get(service);
+    if (!c) return 'no container';
+    return c.status || c.state || 'unknown';
   }
 
   async function doLogs() {
@@ -306,12 +348,25 @@
 
         <div class="columns">
           <div class="card">
-            <h3>Services</h3>
+            <div class="card-head">
+              <h3>Services</h3>
+              <span class="muted small">{runningCount}/{services.length} running</span>
+              <button class="ghost" on:click={refreshStatus} disabled={busy}>Refresh</button>
+            </div>
+            {#if services.length === 0}
+              <p class="muted small">No services loaded.</p>
+            {/if}
             <ul class="services">
               {#each services as service}
                 <li>
-                  <span class="name">{service.service}</span>
-                  <span class="policy {service.policy || 'none'}">{policyLabel(service.policy)}</span>
+                  <span class="svc-name">
+                    <span class="status" class:on={serviceState(service.service) === 'up'} class:down={serviceState(service.service) === 'down'} class:wait={serviceState(service.service) === 'wait'}></span>
+                    <span class="name">{service.service}</span>
+                  </span>
+                  <span class="svc-meta">
+                    <span class="muted small">{serviceDetail(service.service)}</span>
+                    <span class="policy {service.policy || 'none'}">{policyLabel(service.policy)}</span>
+                  </span>
                 </li>
               {/each}
             </ul>
@@ -340,7 +395,6 @@
               <button on:click={doRestart} disabled={busy}>Restart</button>
               <button on:click={doDown} disabled={busy}>Down</button>
               <label class="check-inline"><input type="checkbox" bind:checked={downVolumes} /> volumes</label>
-              <button on:click={doPs} disabled={busy}>Ps</button>
               <label class="check-inline"><input type="checkbox" bind:checked={followLogs} /> follow</label>
               <button on:click={doLogs} disabled={busy}>Logs</button>
             </div>
@@ -352,14 +406,6 @@
                 <span class="muted small">keeps running if you disconnect</span>
               </div>
             {/if}
-            <ul class="containers">
-              {#each containers as c}
-                <li>
-                  <span class="name">{c.service}</span>
-                  <span class="muted small">{c.state} · {c.status}</span>
-                </li>
-              {/each}
-            </ul>
           </div>
         </div>
 
@@ -488,9 +534,16 @@
 
   .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .card-head h3 { margin: 0; flex: 1; }
   ul { list-style: none; margin: 0; padding: 0; }
-  .services li, .containers li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
-  .services li:last-child, .containers li:last-child { border-bottom: 0; }
+  .services li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .services li:last-child { border-bottom: 0; }
+  .svc-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .svc-meta { display: inline-flex; align-items: center; gap: 8px; text-align: right; }
+  .svc-meta .small { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status.down { background: var(--red); }
+  .status.wait { background: var(--amber); }
   .policy { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
   .policy.allow { color: var(--green); border-color: rgba(63, 185, 80, 0.4); }
   .policy.exclude { color: var(--amber); border-color: rgba(210, 153, 34, 0.4); }
