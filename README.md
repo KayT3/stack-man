@@ -69,6 +69,21 @@ sudo ./stackman install
 ./stackman command run hotel update
 ```
 
+## Quick start (client)
+
+```bash
+# one-time: install the Wails CLI (https://wails.io/docs/gettingstarted/installation)
+cd client/frontend && npm install && npm run build
+cd .. && wails build
+```
+
+The resulting `stackman-desktop` binary discovers agents on your WARP subnet
+(or uses the static list in `~/.config/stackman/client.toml`), authenticates with
+your SSH key, and shows the dashboard. See [`docs/client.md`](docs/client.md).
+
+> `go build ./client/...` also works without the Wails toolchain: it produces a
+> headless backend used for smoke tests (`-list-agents`).
+
 ## Documentation
 
 Read in this order:
@@ -93,7 +108,7 @@ stack-man/
 │   ├── cmd/stackman/
 │   └── internal/ (cli, config, daemon, auth, discovery, stack, compose, commands, git, systemd)
 ├── client/                  # the Wails desktop app
-│   ├── main.go  app.go  wails.json
+│   ├── main.go  main_wails.go  app.go  wails.json
 │   └── frontend/
 └── docs/
 ```
@@ -103,7 +118,7 @@ stack-man/
 
 ## Status / roadmap
 
-- [ ] **Phase 1 — Agent core**: config, stack registry, compose parsing, git, command engine, systemd.
-- [ ] **Phase 2 — Daemon**: private RPC API, SSH auth, UDP discovery.
-- [ ] **Phase 3 — Client core**: discovery + auth + stack/git/container operations.
-- [ ] **Phase 4 — Client UI**: dashboard, service lists, command runner, logs. *(last, by design)*
+- [x] **Phase 1 — Agent core**: config, stack registry, compose parsing, git, command engine, systemd.
+- [x] **Phase 2 — Daemon**: private RPC API, SSH auth, UDP discovery.
+- [x] **Phase 3 — Client core**: discovery + auth + stack/git/container operations.
+- [x] **Phase 4 — Client UI**: dashboard, service lists, command runner, logs. *(last, by design)*
