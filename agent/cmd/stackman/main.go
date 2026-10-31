@@ -7,6 +7,8 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/example/stack-man/agent/internal/cli"
 )
 
 func main() {
@@ -28,7 +30,6 @@ func runDaemon(_ []string) {
 }
 
 // runCLI dispatches one-shot commands (config, install, stack, git, ...).
-// TODO(phase 1): wire cobra commands in internal/cli; see docs/agent.md §1.
-func runCLI(_ []string) error {
-	return fmt.Errorf("stackman CLI: not implemented yet")
+func runCLI(args []string) error {
+	return cli.Execute(args)
 }

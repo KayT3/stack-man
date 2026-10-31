@@ -63,6 +63,27 @@ func New() *ExecClient {
 	return &ExecClient{Binary: "git"}
 }
 
+// IsRepo reports whether dir is inside a git work tree.
+func (c *ExecClient) IsRepo(ctx context.Context, dir string) (bool, error) {
+	_, _, err := c.run(ctx, dir, "rev-parse", "--git-dir")
+	if err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// Origin returns the URL configured for the origin remote.
+func (c *ExecClient) Origin(ctx context.Context, dir string) (string, error) {
+	out, _, err := c.run(ctx, dir, "remote", "get-url", "origin")
+	return out, err
+}
+
+// CurrentBranch returns the checked-out branch name.
+func (c *ExecClient) CurrentBranch(ctx context.Context, dir string) (string, error) {
+	out, _, err := c.revParse(ctx, dir, "--abbrev-ref", "HEAD")
+	return out, err
+}
+
 // Status returns porcelain status plus branch/upstream information.
 func (c *ExecClient) Status(ctx context.Context, dir string) (string, error) {
 	out, _, err := c.run(ctx, dir, "status", "--porcelain=v1", "-b")
