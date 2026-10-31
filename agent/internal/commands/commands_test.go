@@ -95,7 +95,7 @@ commands:
 func TestRunParamErrors(t *testing.T) {
 	dir := t.TempDir()
 	f := &File{Commands: map[string]Def{
-		"need": {Steps: []YAMLStep{{Type: "record"}}, Params: []ParamDef{{Name: "name", Required: true}}},
+		"need":   {Steps: []YAMLStep{{Type: "record"}}, Params: []ParamDef{{Name: "name", Required: true}}},
 		"choice": {Steps: []YAMLStep{{Type: "record"}}, Params: []ParamDef{{Name: "mode", Allowed: []string{"a", "b"}}}},
 	}}
 	RegisterStep(&recordingStep{})

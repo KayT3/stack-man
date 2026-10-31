@@ -24,7 +24,7 @@ type File struct {
 type Def struct {
 	Description string     `yaml:"description"`
 	Params      []ParamDef `yaml:"params"`
-	Steps       []YAMLStep     `yaml:"steps"`
+	Steps       []YAMLStep `yaml:"steps"`
 }
 
 // ParamDef is a declared command input.
