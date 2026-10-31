@@ -1,12 +1,33 @@
-// stackman-desktop: the Wails desktop client (docs/client.md).
+// stackman-desktop: the Wails desktop client backend (docs/client.md).
 //
-// NOTE: the full Wails scaffold lands in Phase 3–4 (the UI is intentionally
-// last). When you get there, run `wails init` in this directory (or add
-// github.com/wailsapp/wails/v2) and wire the App methods in app.go.
+// The Wails entry point and webview are provided by the `wails` build tag in
+// main_wails.go (generated/kept alongside `wails.json`). This default build is
+// a headless backend smoke test so `go build ./client/...` works on hosts
+// without the Wails toolchain.
 package main
 
-import "fmt"
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+)
 
 func main() {
-	fmt.Println("stackman-desktop: Wails scaffold not yet created (Phase 3).")
+	listAgents := flag.Bool("list-agents", false, "scan for agents and print JSON")
+	flag.Parse()
+	if !*listAgents {
+		fmt.Println("stackman-desktop: backend built without Wails; use `wails build` (see docs/client.md)")
+		return
+	}
+	app := NewApp()
+	defer app.Close()
+	agents, err := app.ListAgents()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(agents)
 }
