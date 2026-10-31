@@ -1,0 +1,24 @@
+# Go build artifacts
+/agent/stackman
+/agent/stackman.exe
+/client/bin/
+*.exe
+*.test
+*.out
+
+# SQLite state
+*.db
+*.db-wal
+*.db-shm
+
+# Client frontend
+client/frontend/node_modules/
+client/frontend/dist/
+client/frontend/.wails*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
