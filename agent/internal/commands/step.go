@@ -84,6 +84,33 @@ func (s *GitStep) Substitute(params map[string]string) Step {
 	}
 }
 
+// StepServices lists the Compose services a step explicitly targets. Steps
+// that act on no particular service (shell, git, compose over all managed
+// services) return nil. Unsubstituted ${param} placeholders are ignored.
+func StepServices(step Step) []string {
+	switch s := step.(type) {
+	case *ExecStep:
+		if s == nil || s.Service == "" || strings.Contains(s.Service, "${") {
+			return nil
+		}
+		return []string{s.Service}
+	case *ComposeStep:
+		if s == nil {
+			return nil
+		}
+		services := make([]string, 0, len(s.Services))
+		for _, service := range s.Services {
+			if service == "" || strings.Contains(service, "${") {
+				continue
+			}
+			services = append(services, service)
+		}
+		return services
+	default:
+		return nil
+	}
+}
+
 func expand(value string, params map[string]string) string {
 	for name, replacement := range params {
 		value = strings.ReplaceAll(value, "${"+name+"}", replacement)

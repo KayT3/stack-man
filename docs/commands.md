@@ -116,6 +116,14 @@ aborts the command with a clear report.
 | `shell` | `*commands.ShellStep` | `Command`, `Cwd` | raw shell (escape hatch; avoid when possible) |
 | `git` | `*commands.GitStep` | `Action` (`pull`\|`fetch`\|`check`), `Branch` | git op via the `GitClient` |
 
+### Service-aware visibility
+
+A profile command is only offered when every Compose service its steps target
+(`ExecStep.Service`, `ComposeStep.Services`) is defined in the stack's Compose
+file. For example, a `backup` command that execs into the `backup` service
+disappears on test stacks whose Compose file has no such service, and reappears
+on prod. `command run` refuses hidden commands with the same check.
+
 ### Params (parameterized commands)
 
 A command can declare params that are interpolated into step fields:

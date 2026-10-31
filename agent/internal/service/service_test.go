@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -187,6 +188,63 @@ services:
 	}
 	if !strings.Contains(out.String(), "hello") {
 		t.Fatalf("out = %q", out.String())
+	}
+}
+
+func TestProfileCommandsHideMissingServices(t *testing.T) {
+	commands.RegisterProfile(commands.Profile{
+		Repo: "github.com/stackman-tests/conditional-profile",
+		Commands: map[string]commands.Def{
+			"always": {
+				Description: "Targets no service",
+				Steps:       []commands.Step{&commands.ShellStep{Command: "true"}},
+			},
+			"backup": {
+				Description: "Needs the backup service",
+				Steps:       []commands.Step{&commands.ExecStep{Service: "backup", Command: "backup run"}},
+			},
+			"build-app": {
+				Description: "Needs the app service",
+				Steps:       []commands.Step{&commands.ComposeStep{Action: "build", Services: []string{"app"}}},
+			},
+		},
+	})
+
+	svc := testService(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "compose.yml"), []byte(`
+services:
+  app: {image: app}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, dir)
+	st, _, err := svc.AddStack(context.Background(), AddOptions{
+		Path:   dir,
+		Name:   "conditional-demo",
+		Remote: "git@github.com:Stackman-Tests/Conditional-Profile.git",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	infos, err := svc.ListCommands(context.Background(), st.Name)
+	if err != nil {
+		t.Fatalf("ListCommands: %v", err)
+	}
+	visible := map[string]bool{}
+	for _, info := range infos {
+		visible[info.Name] = true
+	}
+	if !visible["always"] || !visible["build-app"] {
+		t.Fatalf("commands targeting existing services missing: %+v", infos)
+	}
+	if visible["backup"] {
+		t.Fatalf("backup should be hidden without a backup service: %+v", infos)
+	}
+
+	if err := svc.RunCommand(context.Background(), st.Name, "backup", nil, io.Discard, nil); err == nil {
+		t.Fatal("expected unavailable command error")
 	}
 }
 

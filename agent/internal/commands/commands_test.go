@@ -219,6 +219,20 @@ func TestTargetServices(t *testing.T) {
 	}
 }
 
+func TestDefServices(t *testing.T) {
+	def := Def{Steps: []Step{
+		&ExecStep{Service: "next"},
+		&ComposeStep{Services: []string{"app", "next", ""}},
+		&ShellStep{Command: "true"},
+		&ExecStep{Service: "${dynamic}"},
+	}}
+	got := def.Services()
+	want := []string{"app", "next"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Services = %#v, want %#v", got, want)
+	}
+}
+
 func TestStepLabel(t *testing.T) {
 	cases := []struct {
 		step Step

@@ -32,6 +32,25 @@ func (d Def) Spec() CommandSpec {
 	return CommandSpec{Params: params}
 }
 
+// Services returns the Compose services the command's steps target, sorted and
+// deduplicated. A command is only offered for stacks whose Compose file
+// defines all of them.
+func (d Def) Services() []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, step := range d.Steps {
+		for _, service := range StepServices(step) {
+			if _, dup := seen[service]; dup {
+				continue
+			}
+			seen[service] = struct{}{}
+			out = append(out, service)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Names returns command names sorted.
 func (p *Profile) Names() []string {
 	if p == nil {

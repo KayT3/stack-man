@@ -278,6 +278,9 @@ type CommandInfo struct {
 }
 
 // ListCommands merges the stack's compiled-in profile with native built-ins.
+// Profile commands that target a service absent from the stack's Compose file
+// are omitted, so a command like `backup` only appears where that service
+// exists.
 func (s *Service) ListCommands(ctx context.Context, name string) ([]CommandInfo, error) {
 	st, err := s.Store.Get(ctx, name)
 	if err != nil {
@@ -286,15 +289,24 @@ func (s *Service) ListCommands(ctx context.Context, name string) ([]CommandInfo,
 	p := commands.ProfileFor(st.Remote)
 	var out []CommandInfo
 	seen := map[string]struct{}{}
-	for _, cmdName := range p.Names() {
-		def, _ := p.Get(cmdName)
-		out = append(out, CommandInfo{
-			Name:        cmdName,
-			Description: def.Description,
-			Params:      def.Spec().Params,
-			Source:      "profile",
-		})
-		seen[cmdName] = struct{}{}
+	if p != nil {
+		services, err := composeServiceSet(ctx, st)
+		if err != nil {
+			return nil, err
+		}
+		for _, cmdName := range p.Names() {
+			def, _ := p.Get(cmdName)
+			if len(missingServices(def, services)) > 0 {
+				continue
+			}
+			out = append(out, CommandInfo{
+				Name:        cmdName,
+				Description: def.Description,
+				Params:      def.Spec().Params,
+				Source:      "profile",
+			})
+			seen[cmdName] = struct{}{}
+		}
 	}
 	builtins := make([]string, 0, len(commands.Names()))
 	for _, cmdName := range commands.Names() {
@@ -325,7 +337,15 @@ func (s *Service) RunCommand(ctx context.Context, name, command string, params m
 		out = io.Discard
 	}
 	p := commands.ProfileFor(st.Remote)
-	if _, ok := p.Get(command); ok {
+	if def, ok := p.Get(command); ok {
+		services, err := composeServiceSet(ctx, st)
+		if err != nil {
+			return err
+		}
+		if missing := missingServices(def, services); len(missing) > 0 {
+			return fmt.Errorf("command %q is not available: service %s not in the stack's compose file",
+				command, strings.Join(missing, ", "))
+		}
 		return commands.NewRunner().Run(ctx, st, p, command, params, out, progress)
 	}
 	if cmd, ok := commands.Get(command); ok {
@@ -335,6 +355,31 @@ func (s *Service) RunCommand(ctx context.Context, name, command string, params m
 		return fmt.Errorf("command %q not found (no profile matches remote %q)", command, st.Remote)
 	}
 	return fmt.Errorf("command %q not found in profile %s or built-ins", command, p.Repo)
+}
+
+// composeServiceSet returns the services defined in the stack's Compose file.
+func composeServiceSet(ctx context.Context, st *stack.Stack) (map[string]struct{}, error) {
+	project, err := compose.Load(ctx, st.Path, st.ComposeFile)
+	if err != nil {
+		return nil, err
+	}
+	services := make(map[string]struct{}, len(project.Services))
+	for _, service := range project.Services {
+		services[service] = struct{}{}
+	}
+	return services, nil
+}
+
+// missingServices returns the services a command needs that the Compose file
+// does not define.
+func missingServices(def commands.Def, available map[string]struct{}) []string {
+	var missing []string
+	for _, service := range def.Services() {
+		if _, ok := available[service]; !ok {
+			missing = append(missing, service)
+		}
+	}
+	return missing
 }
 
 // ---- compose helpers ----
