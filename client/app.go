@@ -252,6 +252,13 @@ func (a *App) ListCommands(agentID, stack string) ([]api.CommandInfo, error) {
 	return out, err
 }
 
+// Jobs lists long-running operations still running on the agent.
+func (a *App) Jobs(agentID string) ([]api.Job, error) {
+	var out []api.Job
+	err := a.call(agentID, api.MethodJobList, nil, &out, 10*time.Second)
+	return out, err
+}
+
 // RunCommand runs a command and streams output/step events.
 func (a *App) RunCommand(agentID, stack, command string, params map[string]string) error {
 	if params == nil {
@@ -287,12 +294,17 @@ func (a *App) call(agentID, method string, params, result any, timeout time.Dura
 		return err
 	}
 	err = conn.Call(ctx, method, params, result)
-	if err != nil && strings.Contains(err.Error(), "connection closed") && timeout > 0 {
+	// Never retry a mutation: it may already be running on the agent as a job,
+	// and a retry would either duplicate work or hit "already running".
+	if err != nil && !api.Mutating(method) && strings.Contains(err.Error(), "connection closed") && timeout > 0 {
 		if redialErr := a.reconnect(agentID); redialErr == nil {
 			if retryConn, connErr := a.connection(agentID); connErr == nil {
 				return retryConn.Call(ctx, method, params, result)
 			}
 		}
+	}
+	if err != nil && api.Mutating(method) && strings.Contains(err.Error(), "connection closed") {
+		return fmt.Errorf("connection lost; %s keeps running on the agent (check running operations)", method)
 	}
 	return err
 }

@@ -7,10 +7,12 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -90,6 +92,7 @@ func testSigner(t *testing.T) ssh.Signer {
 
 type harness struct {
 	cfg    *config.Config
+	svc    *service.Service
 	addr   string
 	cancel context.CancelFunc
 	done   chan error
@@ -138,7 +141,7 @@ func startHarness(t *testing.T, signer ssh.Signer) *harness {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	h := &harness{cfg: &cfg, addr: addr, cancel: cancel, done: done}
+	h := &harness{cfg: &cfg, svc: svc, addr: addr, cancel: cancel, done: done}
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -359,5 +362,117 @@ func TestDaemonStackAddOverRPC(t *testing.T) {
 	call(t, conn, 4, api.MethodStackServices, map[string]string{"name": "demo"}, &services)
 	if len(services) != 1 || services[0].Service != "web" || services[0].Policy != "allow" {
 		t.Fatalf("services = %+v", services)
+	}
+}
+
+func TestJobSurvivesClientDisconnect(t *testing.T) {
+	signer := testSigner(t)
+	h := startHarness(t, signer)
+
+	work := t.TempDir()
+	startedPath := filepath.Join(work, "started")
+	donePath := filepath.Join(work, "done")
+	binDir := filepath.Join(work, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeDocker(t, binDir, startedPath, donePath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "docker-compose.yml"), []byte("services:\n  web: {image: nginx}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, repo)
+	if _, _, err := h.svc.AddStack(context.Background(), service.AddOptions{Path: repo, Name: "demo"}); err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := net.Dial("tcp", h.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handshake(t, conn, signer)
+	params, _ := json.Marshal(map[string]any{"name": "demo", "services": []string{}})
+	writeRequest(t, conn, 2, api.MethodContainersBuild, params)
+	waitForFile(t, startedPath, 5*time.Second)
+
+	// A different connection can see the running job.
+	watcher, err := net.Dial("tcp", h.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watcher.Close()
+	handshake(t, watcher, signer)
+	var jobs []api.Job
+	call(t, watcher, 2, api.MethodJobList, nil, &jobs)
+	if len(jobs) != 1 || jobs[0].Stack != "demo" || jobs[0].Command != "build" {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+
+	// A second mutation on the same stack is refused instead of racing.
+	writeRequest(t, watcher, 4, api.MethodContainersBuild, params)
+	if resp := readResponse(t, watcher, 4); resp.Error == nil {
+		t.Fatal("second build should have been rejected while one is running")
+	}
+
+	// Drop the client mid-build; the fake docker must still finish.
+	conn.Close()
+	waitForFile(t, donePath, 10*time.Second)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		call(t, watcher, 3, api.MethodJobList, nil, &jobs)
+		if len(jobs) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job never cleared: %+v", jobs)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func writeFakeDocker(t *testing.T, dir, started, done string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		script := fmt.Sprintf("@echo off\r\necho started> \"%s\"\r\nping -n 3 127.0.0.1 >nul\r\necho done> \"%s\"\r\nexit /b 0\r\n", started, done)
+		if err := os.WriteFile(filepath.Join(dir, "docker.bat"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	script := fmt.Sprintf("#!/bin/sh\necho started > '%s'\nsleep 2\necho done > '%s'\n", started, done)
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not appear within %s", filepath.Base(path), timeout)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"-c", "user.name=Test", "-c", "user.email=test@example.com", "add", "."},
+		{"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git unavailable: %v: %s", err, out)
+		}
 	}
 }

@@ -42,6 +42,10 @@ type Server struct {
 	mu       sync.Mutex
 	listener net.Listener
 	conns    map[net.Conn]struct{}
+	runCtx   context.Context
+
+	jobsMu sync.Mutex
+	jobs   map[string]*job
 }
 
 // New prepares a server. The agent ID is persisted under the data dir so
@@ -58,6 +62,7 @@ func New(svc *service.Service, cfg *config.Config) (*Server, error) {
 		Started:  time.Now(),
 		Verifier: auth.NewVerifier(cfg.AuthorizedKeysPath),
 		conns:    make(map[net.Conn]struct{}),
+		jobs:     make(map[string]*job),
 	}, nil
 }
 
@@ -121,6 +126,9 @@ func ResolveBindIP(cfg *config.Config) (net.IP, error) {
 
 // Run binds the API and discovery sockets and serves until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
+	s.mu.Lock()
+	s.runCtx = ctx
+	s.mu.Unlock()
 	bindIP, err := ResolveBindIP(s.Config)
 	if err != nil {
 		return err
@@ -281,21 +289,33 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 			continue
 		}
 		reqCtx, reqCancel := context.WithCancel(ctx)
+		// Mutating operations run on a job context rooted at the daemon, not
+		// the connection, so a dropped client does not kill a build halfway.
+		jobCtx, jobCancel := context.WithCancel(s.baseContext())
 		key := string(req.ID)
 		c.mu.Lock()
-		c.cancels[key] = reqCancel
+		c.cancels[key] = func() {
+			reqCancel()
+			jobCancel()
+		}
 		c.mu.Unlock()
 
+		opCtx := reqCtx
+		if detached(req.Method) {
+			opCtx = jobCtx
+		}
+
 		wg.Add(1)
-		go func(req api.Request, key string) {
+		go func(req api.Request, key string, opCtx context.Context) {
 			defer wg.Done()
+			defer jobCancel()
 			defer reqCancel()
 			defer func() {
 				c.mu.Lock()
 				delete(c.cancels, key)
 				c.mu.Unlock()
 			}()
-			result, rpcErr := s.dispatch(reqCtx, req.Method, req.Params, &stream{
+			result, rpcErr := s.dispatch(opCtx, req.Method, req.Params, &stream{
 				conn:   c,
 				method: req.Method,
 			})
@@ -311,7 +331,7 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 				}
 			}
 			_ = c.writer.writeJSON(resp)
-		}(req, key)
+		}(req, key, opCtx)
 	}
 }
 

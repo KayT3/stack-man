@@ -18,15 +18,32 @@
   let upBuild = true;
   let downVolumes = false;
   let followLogs = false;
+  let selectedServices = [];
+  let jobs = [];
+  let jobTimer;
   let outputEl;
+
+  $: runningJobs = jobs.filter((j) => !stack || j.stack === stack.name);
 
   onMount(() => {
     const off = api.onStream(handleStream);
     run('scan agents', refreshAgents);
+    jobTimer = setInterval(refreshJobs, 4000);
     return () => {
+      clearInterval(jobTimer);
       if (typeof off === 'function') off();
     };
   });
+
+  async function refreshJobs() {
+    if (!agent) return;
+    try {
+      jobs = (await api.Jobs(agent.id)) || [];
+    } catch (e) {
+      // Discovery/connection errors are surfaced by explicit actions; polling
+      // should stay quiet.
+    }
+  }
 
   function handleStream(notification) {
     if (!notification || !notification.method) return;
@@ -57,6 +74,7 @@
       append(`error: ${error}\n`);
     } finally {
       busy = false;
+      refreshJobs();
     }
   }
 
@@ -97,10 +115,12 @@
     stack = next;
     check = null;
     selectedCommand = null;
+    selectedServices = [];
     await run(`inspect ${next.name}`, async () => {
       services = (await api.StackServices(agent.id, next.name)) || [];
       commands = (await api.ListCommands(agent.id, next.name)) || [];
       containers = [];
+      await refreshJobs();
     });
   }
 
@@ -120,22 +140,45 @@
   }
 
   async function doUp() {
-    await run(`containers up ${stack.name}`, async () => {
+    await run(`containers up ${stack.name}${targetSuffix()}`, async () => {
       await api.ContainersUp(agent.id, stack.name, {
         build: upBuild,
         force_recreate: false,
         remove_orphans: false,
-        services: []
+        services: selectedServices
       });
-      containers = (await api.ContainersPs(agent.id, stack.name)) || [];
+      await afterContainerOp();
+    });
+  }
+
+  async function doBuild() {
+    await run(`containers build ${stack.name}${targetSuffix()}`, async () => {
+      await api.ContainersBuild(agent.id, stack.name, selectedServices);
+      await afterContainerOp();
+    });
+  }
+
+  async function doRestart() {
+    await run(`containers restart ${stack.name}${targetSuffix()}`, async () => {
+      await api.ContainersRestart(agent.id, stack.name, selectedServices);
+      await afterContainerOp();
     });
   }
 
   async function doDown() {
-    await run(`containers down ${stack.name}`, async () => {
-      await api.ContainersDown(agent.id, stack.name, { volumes: downVolumes, services: [] });
-      containers = (await api.ContainersPs(agent.id, stack.name)) || [];
+    await run(`containers down ${stack.name}${targetSuffix()}`, async () => {
+      await api.ContainersDown(agent.id, stack.name, { volumes: downVolumes, services: selectedServices });
+      await afterContainerOp();
     });
+  }
+
+  async function afterContainerOp() {
+    containers = (await api.ContainersPs(agent.id, stack.name)) || [];
+    await refreshJobs();
+  }
+
+  function targetSuffix() {
+    return selectedServices.length ? ` ${selectedServices.join(' ')}` : '';
   }
 
   async function doPs() {
@@ -276,15 +319,39 @@
 
           <div class="card">
             <h3>Containers</h3>
+            <p class="muted small">Pick services for Up / Build / Restart / Down. None selected means all managed services.</p>
+            <div class="picker">
+              {#each services as service}
+                <label class="chip" class:off={service.policy === 'exclude'}>
+                  <input
+                    type="checkbox"
+                    bind:group={selectedServices}
+                    value={service.service}
+                    disabled={service.policy === 'exclude'}
+                  />
+                  {service.service}
+                </label>
+              {/each}
+            </div>
             <div class="actions wrap">
-              <label class="check-inline"><input type="checkbox" bind:checked={upBuild} /> build</label>
+              <label class="check-inline"><input type="checkbox" bind:checked={upBuild} /> build on up</label>
               <button on:click={doUp} disabled={busy}>Up</button>
+              <button class="primary" on:click={doBuild} disabled={busy}>Build</button>
+              <button on:click={doRestart} disabled={busy}>Restart</button>
               <button on:click={doDown} disabled={busy}>Down</button>
               <label class="check-inline"><input type="checkbox" bind:checked={downVolumes} /> volumes</label>
               <button on:click={doPs} disabled={busy}>Ps</button>
               <label class="check-inline"><input type="checkbox" bind:checked={followLogs} /> follow</label>
               <button on:click={doLogs} disabled={busy}>Logs</button>
             </div>
+            {#if runningJobs.length}
+              <div class="jobs">
+                {#each runningJobs as job}
+                  <span class="job"><span class="spinner"></span>{job.command} · {job.elapsed_seconds}s</span>
+                {/each}
+                <span class="muted small">keeps running if you disconnect</span>
+              </div>
+            {/if}
             <ul class="containers">
               {#each containers as c}
                 <li>
@@ -427,6 +494,23 @@
   .policy { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
   .policy.allow { color: var(--green); border-color: rgba(63, 185, 80, 0.4); }
   .policy.exclude { color: var(--amber); border-color: rgba(210, 153, 34, 0.4); }
+
+  .picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px;
+    font-size: 12px; color: var(--muted);
+  }
+  .chip:has(input:checked) { color: var(--text); border-color: var(--accent); background: rgba(79, 156, 255, 0.12); }
+  .chip.off { opacity: 0.4; cursor: not-allowed; }
+  .jobs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; font-size: 12px; }
+  .job {
+    display: inline-flex; align-items: center; gap: 6px; color: var(--accent);
+    background: rgba(79, 156, 255, 0.12); border: 1px solid rgba(79, 156, 255, 0.35);
+    border-radius: 999px; padding: 3px 10px;
+  }
+  .spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid rgba(79, 156, 255, 0.3); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .commands { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .commands button.active { border-color: var(--accent); color: var(--accent); }

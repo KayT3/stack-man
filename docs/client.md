@@ -89,11 +89,19 @@ func (a *App) GitPull(agentID, stack string) (GitPullResult, error)
 
 func (a *App) ContainersUp(agentID, stack string, opts UpOptions) error
 func (a *App) ContainersDown(agentID, stack string, opts DownOptions) error
+func (a *App) ContainersRestart(agentID, stack string, services []string) error
+func (a *App) ContainersBuild(agentID, stack string, services []string) error
 func (a *App) ContainersPs(agentID, stack string) ([]ContainerStatus, error)
+func (a *App) Jobs(agentID string) ([]Job, error)
 
 func (a *App) ListCommands(agentID, stack string) ([]CommandInfo, error)
 func (a *App) RunCommand(agentID, stack, command string, params map[string]string) error
 ```
+
+`services` on the container calls is the build/start selection: an empty slice
+means every managed service, otherwise only the named services are touched.
+`Jobs` lists mutations still running on the agent, including ones started before
+the client reconnected.
 
 Long-running calls emit `EventsOn("stream")` events that the frontend subscribes
 to for live output.
@@ -114,8 +122,13 @@ A single dashboard, kept minimal for now:
 ```
 
 Views: **Agents** → **Stack detail** (services + policy) → **command runner**
-(with a live output pane). `Check` renders the changed-files list and a
-`safe_to_pull` badge before `Pull` is enabled.
+(with a live output pane). Container actions share a service picker: tick just
+`next` and press **Build** to rebuild only that image; with nothing ticked the
+action covers every managed service. A running-operation pill (from
+`stack.job.list`) shows mutations that are still executing — including builds
+that outlived a closed window — and the agent keeps them running until done.
+`Check` renders the changed-files list and a `safe_to_pull` badge before `Pull`
+is enabled.
 
 ## 6. Key custody
 

@@ -23,6 +23,7 @@ export const ContainersPs = (agentID, stack) => backend().ContainersPs(agentID, 
 export const ContainersLogs = (agentID, stack, service, follow) =>
   backend().ContainersLogs(agentID, stack, service, follow);
 export const ListCommands = (agentID, stack) => backend().ListCommands(agentID, stack);
+export const Jobs = (agentID) => backend().Jobs(agentID);
 export const RunCommand = (agentID, stack, command, params) =>
   backend().RunCommand(agentID, stack, command, params);
 

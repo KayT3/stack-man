@@ -44,6 +44,10 @@ const (
 	MethodCommandList = "stack.command.list"
 	MethodCommandRun  = "stack.command.run"
 
+	// MethodJobList lists long-running operations that keep going after the
+	// requesting client disconnects.
+	MethodJobList = "stack.job.list"
+
 	// MethodCancel cancels an in-flight request by its JSON-RPC id.
 	MethodCancel = "cancel"
 
@@ -59,6 +63,25 @@ const (
 	ErrInvalidParams = -32602
 	ErrInternal      = -32603
 )
+
+// Mutating reports whether method changes server state. Mutating calls run on
+// the agent as jobs that survive a client disconnect, and clients must not
+// blindly retry them after a lost connection.
+func Mutating(method string) bool {
+	switch method {
+	case MethodContainersUp,
+		MethodContainersDown,
+		MethodContainersRestart,
+		MethodContainersBuild,
+		MethodContainersNetworkConnect,
+		MethodContainersNetworkDisconnect,
+		MethodGitPull,
+		MethodCommandRun:
+		return true
+	default:
+		return false
+	}
+}
 
 // Request is a JSON-RPC request/notification frame.
 type Request struct {
@@ -193,6 +216,16 @@ type OKResult struct {
 type CommandRunResult struct {
 	OK       bool `json:"ok"`
 	ExitCode int  `json:"exit_code"`
+}
+
+// Job is one long-running operation on an agent (stack.job.list). Jobs run to
+// completion even if the client that started them disconnects.
+type Job struct {
+	ID             string `json:"id"`
+	Stack          string `json:"stack"`
+	Command        string `json:"command"`
+	Started        string `json:"started"`
+	ElapsedSeconds int    `json:"elapsed_seconds"`
 }
 
 // StreamLog is the params payload of a stream.log notification.

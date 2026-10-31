@@ -104,3 +104,18 @@ chunks (logs) and progress.
 reuse `pkg/api` types verbatim. **Rejected:** gRPC (overkill + TLS/HTTP2 on a
 private subnet), HTTP+REST (clunkier for streaming commands and the custom auth
 handshake).
+
+## ADR-010 - Mutations run as daemon-owned jobs
+
+**Decision:** `containers.{up,down,restart,build}`, network connect/disconnect,
+`git.pull`, and `command.run` run on a context rooted at the daemon and are
+tracked in a `stack.job.list` registry. A client disconnect only ends streaming
+reads; it does not cancel a mutation. One mutation per stack may run at a time.
+
+**Why:** `docker compose build` takes minutes; a laptop sleeping or WARP
+reconnecting should not leave a half-built image or a killed deploy. Jobs are
+visible after reconnect so the UI can show them and avoid retrying a mutation.
+
+**Rejected:** tying mutations to the connection (the previous failure mode), and
+outsourcing detachment to `systemd-run`/Docker retries (opaque, and progress
+cannot be reported).

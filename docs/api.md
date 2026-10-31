@@ -173,6 +173,19 @@ error `{ "code": -32010, "message": "conflict; pull aborted" }`.
 | `stack.containers.network_connect` | `{ name, network, services[] }` | `{ ok }` |
 | `stack.containers.network_disconnect` | `{ name, network, services[] }` | `{ ok }` |
 
+Mutating methods (`up`, `down`, `restart`, `build`, network connect/disconnect,
+`git.pull`, `command.run`) run as **jobs**: they are owned by the daemon, not
+the connection, so a client that disconnects mid-build does not kill it. While
+a job runs on a stack, a second mutation on that stack is refused with
+`-32010` (`ErrConflict`).
+
+| Method | Params | Result |
+|--------|--------|--------|
+| `stack.job.list` | — | `[Job]` |
+
+`Job`: `{ "id": "job-3-…", "stack": "hotel", "command": "build",
+"started": "2026-10-31T12:00:00Z", "elapsed_seconds": 42 }`.
+
 ### Profile commands
 
 | Method | Params | Result |
@@ -195,8 +208,12 @@ Long-running methods stream progress to the client as notifications:
               "label": "docker compose exec next npx prisma migrate deploy" } }
 ```
 
-Cancellation: the client closes the TCP connection (or sends a `cancel` request);
-the daemon's request context is cancelled and the running command is stopped.
+Cancellation: an explicit `cancel` request with the request id stops the
+operation. Dropping the TCP connection stops streaming reads (logs) but does
+not stop a mutation: `up`, `down`, `restart`, `build`, `git.pull`, and
+`command.run` keep running as server-side jobs. `stack.job.list` shows what is
+still running. Clients must not retry a mutation after a lost connection; they
+should list jobs instead.
 
 ## 5. Versioning
 
